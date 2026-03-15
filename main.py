@@ -11,6 +11,7 @@ from pubnub.enums import PNStatusCategory
 from pubnub.pnconfiguration import PNConfiguration
 from pubnub.pubnub import PubNub
 
+from linuxtts import LinuxTTS
 from wintts import WindowsTTS
 
 
@@ -611,11 +612,41 @@ def build_pubnub() -> PubNub:
     return PubNub(config)
 
 
+import platform
+
+
+def create_tts():
+    """Create appropriate TTS for the platform."""
+    system = platform.system()
+
+    if system == "Windows":
+        from wintts import WindowsTTS
+
+        return WindowsTTS()
+    elif system == "Darwin":  # macOS
+        from macostts import MacOSTTS
+
+        return MacOSTTS()
+    elif system == "Linux":
+        # Auto-find Norwegian voice or specify path
+        from linuxtts import LinuxTTS
+
+        return LinuxTTS(
+            model_path=None,  # Auto-find, or specify: "/path/to/no_NO-talesyntese-medium.onnx"
+            volume=1.0,
+            speed=1.0,  # 1.0 = normal, 0.5 = faster, 2.0 = slower
+            use_cuda=False,  # Set True if you have GPU
+        )
+    else:
+        print(f"[warning] Unknown platform: {system}")
+        return None
+
+
 def main():
     pubnub = build_pubnub()
     normalizer = GeniusBasketballNormalizer()
     deduper = RecentEventDeduper(maxlen=500)
-    tts = WindowsTTS()
+    tts = create_tts()
     listener = MatchFeedListener(normalizer, deduper, tts)
 
     pubnub.add_listener(listener)
