@@ -2,8 +2,10 @@ import subprocess
 import threading
 import queue
 
+from tts import BaseTTS
 
-class MacOSTTS:
+
+class MacOSTTS(BaseTTS):
     def __init__(self, voice: str = "Nora"):  # Nora is Norwegian voice
         self.voice = voice
         self.audio_queue = queue.Queue()

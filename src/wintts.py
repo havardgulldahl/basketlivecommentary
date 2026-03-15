@@ -1,9 +1,15 @@
-import pyttsx3
 import threading
 import queue
 
+try:
+    import pyttsx3
+except ImportError:
+    raise RuntimeError("pyttsx3 required for Windows TTS:\n" "  pip install pyttsx3")
 
-class WindowsTTS:
+from tts import BaseTTS
+
+
+class WindowsTTS(BaseTTS):
     def __init__(self):
         self.engine = pyttsx3.init()
         # Try to find Norwegian voice

@@ -1,4 +1,12 @@
-"""
+import sys
+import wave
+import subprocess
+import tempfile
+import os
+from pathlib import Path
+from typing import Optional
+
+help = """
 # Install piper-tts
 pip install piper-tts
 
@@ -12,18 +20,17 @@ pip install pyaudio
 sudo apt install alsa-utils  # for aplay
 
 """
+try:
+    from piper import PiperVoice
+    from piper.voice import SynthesisConfig
+except ImportError:
+    print(help)
+    sys.exit(1)
 
-import wave
-import subprocess
-import tempfile
-import os
-from pathlib import Path
-from typing import Optional
-from piper import PiperVoice
-from piper.voice import SynthesisConfig
+from tts import BaseTTS
 
 
-class LinuxTTS:
+class LinuxTTS(BaseTTS):
     """
     Text-to-speech for Linux using piper-tts Python API.
     """
