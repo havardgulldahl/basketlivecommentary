@@ -118,6 +118,8 @@ class EventReplayer:
                         print(f"  💬 {spoken}")
                         if self.tts:
                             self.tts.speak(spoken)
+                    else:
+                        print(f"  💬 (no commentary)")
 
                     events_processed += 1
 
