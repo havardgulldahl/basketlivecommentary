@@ -10,7 +10,7 @@ from typing import Optional
 from dataclasses import asdict
 
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
-from commentary import norwegian_commentary
+from commentary import get_commentary
 from match_metadata import MatchMetadata
 from tts import BaseTTS
 import platform
@@ -45,14 +45,21 @@ class EventReplayer:
         if not self.log_file.exists():
             raise FileNotFoundError(f"Log file not found: {log_file}")
 
-    def replay(self, start_from: int = 0, max_events: Optional[int] = None):
+    def replay(
+        self,
+        start_from: int = 0,
+        max_events: Optional[int] = None,
+        language: str = "no",
+    ):
         """
         Replay events from the log file.
 
         Args:
             start_from: Skip this many events at the beginning
             max_events: Maximum number of events to replay (None = all)
+            language: Language code ("no" for Norwegian, "en" for English)
         """
+
         print(f"\n{'='*60}")
         print(f"Replaying: {self.log_file}")
         print(f"Speed: {self.speed}x")
@@ -113,7 +120,7 @@ class EventReplayer:
                     self._display_event(evt, line_num)
 
                     # Generate and speak commentary
-                    spoken = norwegian_commentary(evt, self.metadata)
+                    spoken = get_commentary(evt, self.metadata, language=language)
                     if spoken:
                         print(f"  💬 {spoken}")
                         if self.tts:
@@ -219,22 +226,23 @@ class EventReplayer:
             print(f"  Description: {evt.description}")
 
 
-def create_tts() -> Optional[BaseTTS]:
+def create_tts(language: str = "no") -> Optional[BaseTTS]:
     """Create appropriate TTS for the platform."""
     system = platform.system()
 
     if system == "Windows":
         from wintts import WindowsTTS
 
-        return WindowsTTS()
+        return WindowsTTS(language=language)
     elif system == "Darwin":  # macOS
         from macostts import MacOSTTS
 
-        return MacOSTTS()
+        return MacOSTTS(language=language)
     elif system == "Linux":
         from linuxtts import LinuxTTS
 
         return LinuxTTS(
+            language=language,
             model_path=None,
             volume=1.0,
             speed=1.0,
@@ -270,10 +278,17 @@ def main():
     )
     ap.add_argument("--silent", action="store_true", help="Disable TTS output")
     ap.add_argument("--compact", action="store_true", help="Use compact output format")
+    ap.add_argument(
+        "--language",
+        type=str,
+        default="no",
+        choices=["no", "en"],
+        help="Language for commentary (no = Norwegian, en = English)",
+    )
 
     args = ap.parse_args()
 
-    tts = None if args.silent else create_tts()
+    tts = None if args.silent else create_tts(language=args.language)
 
     replayer = EventReplayer(
         log_file=args.log_file,
@@ -286,6 +301,7 @@ def main():
         replayer.replay(
             start_from=args.start_from,
             max_events=args.max_events,
+            language=args.language,
         )
     except KeyboardInterrupt:
         print("\n\nReplay interrupted by user")

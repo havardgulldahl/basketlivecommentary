@@ -11,15 +11,17 @@ from tts import BaseTTS
 
 
 class WindowsTTS(BaseTTS):
-    def __init__(self, test_mode: bool = False):
+    def __init__(self, language: str = "no", test_mode: bool = False):
         """
         Initialize Windows TTS.
 
         Args:
+            language: Language code ("no" for Norwegian, "en" for English)
             test_mode: If True, print debug info but don't actually speak
         """
         self.test_mode = test_mode
         self.voice_id = None
+        self.language = language
 
         if not test_mode:
             try:
@@ -30,18 +32,22 @@ class WindowsTTS(BaseTTS):
                 for i, voice in enumerate(voices):
                     print(f"  [{i}] {voice.name}")
 
-                # Try to find Norwegian voice
+                # Try to find voice based on language
                 for voice in voices:
-                    if (
+                    if self.language == "no" and (
                         "norwegian" in voice.name.lower()
                         or "norsk" in voice.name.lower()
                     ):
                         self.voice_id = voice.id
                         print(f"[wintts] Using Norwegian voice: {voice.name}")
                         break
+                    elif self.language == "en" and "english" in voice.name.lower():
+                        self.voice_id = voice.id
+                        print(f"[wintts] Using English voice: {voice.name}")
+                        break
 
                 if not self.voice_id:
-                    print("[wintts] No Norwegian voice found, using default")
+                    print(f"[wintts] No {self.language} voice found, using default")
                     self.voice_id = voices[0].id if voices else None
 
                 # Clean up the test engine

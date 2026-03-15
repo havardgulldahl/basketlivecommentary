@@ -37,6 +37,7 @@ class LinuxTTS(BaseTTS):
 
     def __init__(
         self,
+        language: str = "no",
         model_path: Optional[str] = None,
         volume: float = 1.0,
         speed: float = 1.0,
@@ -46,21 +47,23 @@ class LinuxTTS(BaseTTS):
         Initialize Linux TTS with Piper.
 
         Args:
+            language: Language code ("no" for Norwegian, "en" for English)
             model_path: Path to .onnx voice model. If None, tries to find Norwegian voice.
             volume: Volume level (0.0 to 1.0+)
             speed: Speech speed multiplier (1.0 = normal, 2.0 = twice as slow)
             use_cuda: Use GPU acceleration if available
         """
+        self.language = language
         self.volume = volume
         self.speed = speed
 
         # Find or use provided model
         if model_path is None:
-            model_path = self._find_norwegian_voice()
+            model_path = self._find_language_voice(language)
 
         if not model_path or not os.path.exists(model_path):
             raise RuntimeError(
-                "No Piper voice model found. Download Norwegian voice:\n"
+                f"No Piper voice model found for language '{language}'. Download Norwegian voice:\n"
                 "  python3 -m piper.download_voices no_NO-talesyntese-medium\n"
                 "Or specify model_path manually."
             )
@@ -77,8 +80,8 @@ class LinuxTTS(BaseTTS):
             normalize_audio=True,
         )
 
-    def _find_norwegian_voice(self) -> Optional[str]:
-        """Try to find a Norwegian voice model in common locations."""
+    def _find_language_voice(self, language: str) -> Optional[str]:
+        """Try to find a voice model for the specified language in common locations."""
         # Common installation paths
         possible_paths = [
             Path.home() / ".local" / "share" / "piper-tts" / "voices",
@@ -86,14 +89,16 @@ class LinuxTTS(BaseTTS):
             Path("./voices"),
         ]
 
-        # Look for Norwegian models
+        # Look for models matching the specified language
         for base_path in possible_paths:
             if base_path.exists():
                 for model_file in base_path.rglob("*.onnx"):
-                    if (
-                        "no_" in model_file.name.lower()
+                    if language == "no" and (
+                        "no" in model_file.name.lower()
                         or "norwegian" in model_file.name.lower()
                     ):
+                        return str(model_file)
+                    elif language == "en" and "en" in model_file.name.lower():
                         return str(model_file)
 
         return None

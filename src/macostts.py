@@ -6,8 +6,9 @@ from tts import BaseTTS
 
 
 class MacOSTTS(BaseTTS):
-    def __init__(self, voice: str = "Nora"):  # Nora is Norwegian voice
-        self.voice = voice
+    def __init__(self, language: str = "no"):  # Nora is Norwegian voice
+        self.voice = "Nora" if language == "no" else "Alex"
+        self.language = language
         self.audio_queue = queue.Queue()
         self.player_thread = threading.Thread(target=self._play_loop, daemon=True)
         self.player_thread.start()

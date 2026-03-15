@@ -289,7 +289,7 @@ def build_pubnub() -> PubNub:
     return PubNub(config)
 
 
-def create_tts() -> Optional[BaseTTS]:
+def create_tts(language: str) -> Optional[BaseTTS]:
     """Create appropriate TTS for the platform."""
     system = platform.system()
 
@@ -297,11 +297,11 @@ def create_tts() -> Optional[BaseTTS]:
         if system == "Windows":
             from wintts import WindowsTTS
 
-            return WindowsTTS()
+            return WindowsTTS(language=language)
         elif system == "Darwin":  # macOS
             from macostts import MacOSTTS
 
-            return MacOSTTS()
+            return MacOSTTS(language=language)
         elif system == "Linux":
             from linuxtts import LinuxTTS
 
@@ -310,6 +310,7 @@ def create_tts() -> Optional[BaseTTS]:
                 volume=1.0,
                 speed=1.0,
                 use_cuda=False,
+                language=language,
             )
         else:
             print(f"[warning] Unknown platform: {system}")
@@ -319,11 +320,11 @@ def create_tts() -> Optional[BaseTTS]:
         return None
 
 
-def main(match_id: int, silent: bool = False):
+def main(match_id: int, silent: bool = False, language: str = "no"):
     pubnub = build_pubnub()
     normalizer = GeniusBasketballNormalizer()
     deduper = RecentEventDeduper(maxlen=500)
-    tts = create_tts() if not silent else None
+    tts = create_tts(language=language) if not silent else None
     game_clock = GameClock()
     listener = MatchFeedListener(normalizer, deduper, tts, game_clock)
 
@@ -365,5 +366,12 @@ if __name__ == "__main__":
     )
     ap.add_argument("match_id", type=int, help="Match ID to subscribe to")
     ap.add_argument("--silent", action="store_true", help="Disable TTS output")
+    ap.add_argument(
+        "--language",
+        type=str,
+        default="no",
+        choices=["no", "en"],
+        help="Language for TTS (default: no)",
+    )
     args = ap.parse_args()
-    main(args.match_id, silent=args.silent)
+    main(args.match_id, silent=args.silent, language=args.language)
