@@ -47,10 +47,11 @@ class GeniusBasketballNormalizer:
     }
 
     # Timer type codes
-    TIMER_START_CODES = {6}
-    TIMER_END_CODES = {7}
-    TIMER_MATCH_END_CODES = {5}
-    TIMER_UPDATE_CODES = {3}
+    TIMER_START_CODES = {1, 6}  # 1=Start, 6=Period start
+    TIMER_STOP_CODES = {2}  # 2=Stop
+    TIMER_END_CODES = {7}  # 7=Period end
+    TIMER_MATCH_END_CODES = {5}  # 5=Match end
+    TIMER_UPDATE_CODES = {3}  # 3=Update
 
     def normalize(self, envelope_message: Any) -> Optional[NormalizedEvent]:
         """
@@ -109,6 +110,22 @@ class GeniusBasketballNormalizer:
                     f"Offensive rebound by player {player}"
                     if player is not None
                     else "Offensive rebound"
+                ),
+            )
+        if raw_type == "Turnover":
+            return self._build_event(
+                raw=raw,
+                match_id=match_id,
+                raw_type=raw_type,
+                kind="turnover",
+                subtype=None,
+                team=team,
+                player=player,
+                points=None,
+                period=period,
+                clock=clock,
+                description=(
+                    f"Turnover by player {player}" if player is not None else "Turnover"
                 ),
             )
 
@@ -299,12 +316,13 @@ class GeniusBasketballNormalizer:
         timer_type = self._to_int(raw.get("Type"))
 
         if timer_type in self.TIMER_START_CODES:
+            subtype = "period_start" if timer_type == 6 else "start"
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type="Timer",
-                kind="period",
-                subtype="start",
+                kind="period" if timer_type == 6 else "timer",
+                subtype=subtype,
                 team=team,
                 player=player,
                 points=None,
@@ -312,9 +330,24 @@ class GeniusBasketballNormalizer:
                 clock=clock,
                 description=(
                     f"Start of period {period}"
-                    if period is not None
-                    else "Period start"
+                    if timer_type == 6 and period is not None
+                    else "Clock start"
                 ),
+            )
+
+        if timer_type in self.TIMER_STOP_CODES:
+            return self._build_event(
+                raw=raw,
+                match_id=match_id,
+                raw_type="Timer",
+                kind="timer",
+                subtype="stop",
+                team=team,
+                player=player,
+                points=None,
+                period=period,
+                clock=clock,
+                description="Clock stop",
             )
 
         if timer_type in self.TIMER_END_CODES:
@@ -350,7 +383,6 @@ class GeniusBasketballNormalizer:
             )
 
         if timer_type in self.TIMER_UPDATE_CODES:
-            # Clock update - usually silent
             return self._build_event(
                 raw=raw,
                 match_id=match_id,

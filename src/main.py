@@ -14,6 +14,7 @@ from pubnub.pubnub import PubNub
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
 from commentary import norwegian_commentary
 from game_clock import GameClock
+from match_metadata import MatchMetadata
 from tts import BaseTTS
 
 
@@ -66,6 +67,7 @@ class MatchFeedListener(SubscribeCallback):
         self.game_clock = game_clock
         self.tts = tts
         self.log_file = log_file
+        self.metadata: Optional[MatchMetadata] = None
 
         # Open the log file in append mode
         self.log_fp = open(self.log_file, "a", encoding="utf-8")
@@ -92,6 +94,13 @@ class MatchFeedListener(SubscribeCallback):
             self.log_fp.write(json.dumps(raw_msg, ensure_ascii=False) + "\n")
             self.log_fp.flush()
 
+            # Check if this is match metadata
+            if (
+                isinstance(raw_msg, dict)
+                and raw_msg.get("MatchEventType") == "MatchData"
+            ):
+                self._handle_match_data(raw_msg)
+
             evt = self.normalizer.normalize(raw_msg)
             if evt is None:
                 print("[normalize] skipped: could not parse payload")
@@ -104,8 +113,19 @@ class MatchFeedListener(SubscribeCallback):
             print("[normalized]")
             print(json.dumps(asdict(evt), ensure_ascii=False, indent=2, default=str))
 
-            spoken = norwegian_commentary(evt)
+            # Enrich event with player names if metadata available
+            if self.metadata and evt.player:
+                player_name = self.metadata.get_player_display_name(evt.player)
+                print(f"[player] {player_name}")
+
+            spoken = norwegian_commentary(evt, metadata=self.metadata)
             if spoken:
+                # Optionally enhance commentary with player names
+                if self.metadata and evt.player:
+                    player_name = self.metadata.get_player_name(evt.player)
+                    # Replace generic "spiller {id}" with actual name
+                    spoken = spoken.replace(f"spiller {evt.player}", player_name)
+
                 print(f"[commentary] {spoken}")
                 if self.tts:
                     self.tts.speak(spoken)
@@ -117,6 +137,16 @@ class MatchFeedListener(SubscribeCallback):
             import traceback
 
             traceback.print_exc()
+
+    def _handle_match_data(self, raw_msg: dict):
+        """Handle MatchData event containing rosters and match info."""
+        try:
+            self.metadata = MatchMetadata.from_raw(raw_msg)
+            print("\n[metadata] Match data loaded:")
+            print(self.metadata.to_summary())
+            print()
+        except Exception as e:
+            print(f"[error] Failed to parse match metadata: {e}")
 
 
 # =========================

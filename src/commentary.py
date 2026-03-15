@@ -1,154 +1,104 @@
-from typing import Optional
 from normalizer import NormalizedEvent
+from match_metadata import MatchMetadata
+from typing import Optional
 
 
-def _team_name(team: str) -> str:
-    """Convert team code to Norwegian name."""
-    if team == "H":
-        return "hjemmelaget"
-    elif team == "A":
-        return "bortelaget"
-    return f"lag {team}"
-
-
-def norwegian_commentary(evt: NormalizedEvent) -> Optional[str]:
+def norwegian_commentary(
+    evt: NormalizedEvent, metadata: Optional[MatchMetadata] = None
+) -> Optional[str]:
     """
-    Generate Norwegian commentary for normalized events.
+    Generate Norwegian commentary for a normalized event.
+
+    Args:
+        evt: The normalized event
+        metadata: Optional match metadata for player/team names
+
+    Returns:
+        Norwegian commentary string, or None if event should be silent
     """
 
-    # Shot events
-    if evt.kind == "shot":
-        # Made shots
-        if evt.subtype == "made_3p":
-            return (
-                f"TRE POENG fra spiller {evt.player}!" if evt.player else "TRE POENG!"
-            )
+    # Helper to get player name
+    def player_name(player_id: Optional[int]) -> str:
+        if metadata and player_id:
+            return metadata.get_player_name(player_id)
+        return f"spiller {player_id}" if player_id else "ukjent spiller"
 
-        if evt.subtype == "made_2p":
-            return f"To poeng fra spiller {evt.player}." if evt.player else "To poeng."
-
-        if evt.subtype == "made_1p":
-            return (
-                f"Frikast inn av spiller {evt.player}."
-                if evt.player
-                else "Frikast inn."
-            )
-
-        if evt.subtype == "penalty_made_1p":
-            return (
-                f"Straffekast inn av spiller {evt.player}!"
-                if evt.player
-                else "Straffekast inn!"
-            )
-
-        # Missed shots
-        if evt.subtype == "miss_3p":
-            return (
-                f"Bommer på treeren, spiller {evt.player}."
-                if evt.player
-                else "Bom på trepoenger."
-            )
-
-        if evt.subtype == "miss_2p":
-            return f"Bommer, spiller {evt.player}." if evt.player else "Bom."
-
-        if evt.subtype == "miss_1p":
-            return (
-                f"Bommer på frikastet, spiller {evt.player}."
-                if evt.player
-                else "Bom på frikast."
-            )
-
-        if evt.subtype == "penalty_miss_1p":
-            return (
-                f"Bommer på straffekastet, spiller {evt.player}!"
-                if evt.player
-                else "Bommer på straffekastet!"
-            )
-
-        # Blocked
-        if evt.subtype == "blocked_2p":
-            return "Blokkert! Flott forsvarsspill!"
-
-    # Fouls
-    if evt.kind == "foul":
-        if evt.subtype == "shooting":
-            return (
-                f"Feil i skuddsituasjon på spiller {evt.player}. Frikast."
-                if evt.player
-                else "Feil i skuddsituasjon. Frikast."
-            )
-
-        if evt.subtype == "defensive":
-            return (
-                f"Defensiv feil på spiller {evt.player}."
-                if evt.player
-                else "Defensiv feil."
-            )
-
-        if evt.subtype == "offensive":
-            return (
-                f"Offensiv feil på spiller {evt.player}."
-                if evt.player
-                else "Offensiv feil."
-            )
-
-        if evt.subtype == "technical":
-            return (
-                f"Teknisk feil på spiller {evt.player}!"
-                if evt.player
-                else "Teknisk feil!"
-            )
-
-        if evt.subtype == "flagrant":
-            return (
-                f"Unsportslig feil på spiller {evt.player}!"
-                if evt.player
-                else "Unsportslig feil!"
-            )
-
-        # Generic foul
-        return f"Feil på spiller {evt.player}." if evt.player else "Feil dømt."
-
-    # Rebounds
-    if evt.kind == "rebound":
-        if evt.subtype == "defensive":
-            return (
-                f"Defensiv retursball, spiller {evt.player}."
-                if evt.player
-                else "Defensiv retursball."
-            )
-        if evt.subtype == "offensive":
-            return (
-                f"Offensiv retursball, spiller {evt.player}!"
-                if evt.player
-                else "Offensiv retursball!"
-            )
-
-    # Timeouts
-    if evt.kind == "timeout":
-        team_name = _team_name(evt.team) if evt.team else None
-        return f"Timeout for {team_name}." if team_name else "Timeout."
-
-    # Period events
-    if evt.kind == "period":
-        if evt.subtype == "start":
-            return (
-                f"Periode {evt.period} er i gang."
-                if evt.period
-                else "Ny periode er i gang."
-            )
-        if evt.subtype == "end":
-            return f"Slutt på periode {evt.period}." if evt.period else "Periodeslutt."
-
-    # Match events
-    if evt.kind == "match":
-        if evt.subtype == "end":
-            return "Kampen er slutt!"
+    # Helper to get team name
+    def team_name(team_code: Optional[str]) -> str:
+        if metadata and team_code:
+            return metadata.get_team_name(team_code)
+        return f"lag {team_code}" if team_code else "ukjent lag"
 
     # Silent events (no commentary)
     if evt.kind in ("timer", "match_data"):
         return None
 
-    # No commentary for this event
+    # Shots
+    if evt.kind == "shot":
+        if evt.subtype == "made_2pt":
+            return f"To poeng fra {player_name(evt.player)}."
+
+        if evt.subtype == "made_3pt":
+            return f"Tre poeng! {player_name(evt.player)} skårer fra distanse."
+
+        if evt.subtype == "made_ft":
+            return f"Straffekast inne av {player_name(evt.player)}."
+
+        if evt.subtype == "missed_2pt":
+            return f"Bom på topoenger av {player_name(evt.player)}."
+
+        if evt.subtype == "missed_3pt":
+            return f"Trepoengsforsøk bom av {player_name(evt.player)}."
+
+        if evt.subtype == "missed_ft":
+            return f"Straffekast bom av {player_name(evt.player)}."
+
+    # Rebounds
+    if evt.kind == "rebound":
+        if evt.subtype == "defensive":
+            return f"Defensiv retur til {player_name(evt.player)}."
+
+        if evt.subtype == "offensive":
+            return f"Offensiv retur til {player_name(evt.player)}."
+
+    # Fouls
+    if evt.kind == "foul":
+        if evt.subtype == "personal":
+            return f"Personlig feil på {player_name(evt.player)}."
+
+        if evt.subtype == "offensive":
+            return f"Offensiv feil på {player_name(evt.player)}."
+
+        if evt.subtype == "technical":
+            return f"Teknisk feil på {player_name(evt.player)}."
+
+        if evt.subtype == "unsportsmanlike":
+            return f"Usportslig feil på {player_name(evt.player)}."
+
+        if evt.subtype == "disqualifying":
+            return (
+                f"Diskvalifiserende feil! {player_name(evt.player)} er ute av kampen."
+            )
+
+    # Timeouts
+    if evt.kind == "timeout":
+        return f"Timeout til {team_name(evt.team)}."
+
+    # Turnovers
+    if evt.kind == "turnover":
+        return f"Balltap av {player_name(evt.player)}."
+
+    # Periods
+    if evt.kind == "period":
+        if evt.subtype == "start":
+            return f"Periode {evt.period} er i gang."
+
+        if evt.subtype == "end":
+            return f"Slutt på periode {evt.period}."
+
+    # Match
+    if evt.kind == "match":
+        if evt.subtype == "end":
+            return "Kampen er slutt!"
+
     return None
