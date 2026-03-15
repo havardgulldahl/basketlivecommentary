@@ -2,13 +2,16 @@ import json
 import signal
 import sys
 import time
+import threading
+import platform
 from collections import deque
 from dataclasses import asdict
-import platform
+from typing import Optional
+from datetime import datetime
 
 from pubnub.callbacks import SubscribeCallback
-from pubnub.enums import PNStatusCategory
-from pubnub.pnconfiguration import PNConfiguration
+from pubnub.enums import PNStatusCategory, PNReconnectionPolicy
+from pubnub.pnconfig import PNConfiguration  # Fixed import
 from pubnub.pubnub import PubNub
 
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
@@ -22,7 +25,7 @@ from tts import BaseTTS
 # Config
 # =========================
 
-SUBSCRIBE_KEY = "sub-c-fa031a92-9639-11e8-8ef1-fea37cdf89b9"
+SUBSCRIBE_KEY = "sub-c-fd40e2e6-8f2f-11e5-bd2a-02ee2ddab7fe"
 
 
 # =========================
@@ -35,9 +38,11 @@ class RecentEventDeduper:
         self.items = deque(maxlen=maxlen)
         self.set_items = set()
 
-    def seen(self, fingerprint: str) -> bool:
+    def is_new(self, evt: NormalizedEvent) -> bool:
+        """Check if event is new (not a duplicate)."""
+        fingerprint = evt.fingerprint
         if fingerprint in self.set_items:
-            return True
+            return False
 
         if len(self.items) == self.items.maxlen:
             old = self.items.popleft()
@@ -45,7 +50,7 @@ class RecentEventDeduper:
 
         self.items.append(fingerprint)
         self.set_items.add(fingerprint)
-        return False
+        return True
 
 
 # =========================
@@ -58,39 +63,86 @@ class MatchFeedListener(SubscribeCallback):
         self,
         normalizer: GeniusBasketballNormalizer,
         deduper: RecentEventDeduper,
-        tts: BaseTTS,
+        tts: Optional[BaseTTS],
         game_clock: GameClock,
-        log_file: str = "raw_events.jsonl",
     ):
+        super().__init__()
         self.normalizer = normalizer
         self.deduper = deduper
         self.game_clock = game_clock
         self.tts = tts
-        self.log_file = log_file
         self.metadata: Optional[MatchMetadata] = None
 
-        # Open the log file in append mode
-        self.log_fp = open(self.log_file, "a", encoding="utf-8")
+        # Open log file with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = f"raw_events_{timestamp}.jsonl"
+        self.log_fp = open(self.log_file, "w", encoding="utf-8")
+        print(f"[log] Writing raw events to: {self.log_file}")
+
+        # Connection state
+        self.is_connected = False
+        self.reconnect_count = 0
+        self.last_event_time = time.time()
 
     def status(self, pubnub, status):
+        """Handle connection status changes."""
         category = status.category
+
         if category == PNStatusCategory.PNConnectedCategory:
-            print("[status] Connected to PubNub")
-        elif category == PNStatusCategory.PNUnexpectedDisconnectCategory:
-            print("[status] Unexpected disconnect")
+            self.is_connected = True
+            if self.reconnect_count > 0:
+                print(
+                    f"\n✅ [network] Reconnected successfully (attempt #{self.reconnect_count})"
+                )
+            else:
+                print("✅ [network] Connected to PubNub")
+            self.reconnect_count = 0
+
         elif category == PNStatusCategory.PNReconnectedCategory:
-            print("[status] Reconnected")
-        else:
-            print(f"[status] {category}")
+            self.is_connected = True
+            print(f"\n✅ [network] Reconnected to PubNub")
+
+        elif category == PNStatusCategory.PNDisconnectedCategory:
+            self.is_connected = False
+            print(f"\n⚠️  [network] Disconnected from PubNub")
+
+        elif category == PNStatusCategory.PNUnexpectedDisconnectCategory:
+            self.is_connected = False
+            print(
+                f"\n❌ [network] Unexpected disconnection - PubNub will auto-reconnect"
+            )
+
+        elif category == PNStatusCategory.PNConnectionError:
+            self.is_connected = False
+            self.reconnect_count += 1
+            print(f"\n❌ [network] Connection error (attempt #{self.reconnect_count})")
+
+        elif category == PNStatusCategory.PNReconnectionAttemptsExhausted:
+            self.is_connected = False
+            print(
+                f"\n❌ [network] Reconnection attempts exhausted - manual restart may be needed"
+            )
+
+        elif category == PNStatusCategory.PNAccessDeniedCategory:
+            print(f"\n❌ [network] Access denied - check your PubNub credentials")
+
+        elif category == PNStatusCategory.PNTimeoutCategory:
+            print(f"\n⚠️  [network] Request timeout")
+
+        # Log all status events for debugging
+        print(f"[status] {category.name}")
 
     def presence(self, pubnub, presence):
         pass
 
     def message(self, pubnub, message):
+        """Handle incoming messages with heartbeat monitoring."""
+        self.last_event_time = time.time()
+
         try:
             raw_msg = message.message
-            print("\n[raw]")
-            print(json.dumps(raw_msg, ensure_ascii=False, indent=2))
+
+            # Log raw event
             self.log_fp.write(json.dumps(raw_msg, ensure_ascii=False) + "\n")
             self.log_fp.flush()
 
@@ -100,32 +152,41 @@ class MatchFeedListener(SubscribeCallback):
                 and raw_msg.get("MatchEventType") == "MatchData"
             ):
                 self._handle_match_data(raw_msg)
+                return  # Don't process MatchData as regular event
 
+            # Normalize event
             evt = self.normalizer.normalize(raw_msg)
             if evt is None:
                 print("[normalize] skipped: could not parse payload")
                 return
 
-            if self.deduper.seen(evt.fingerprint):
+            # Deduplicate
+            if not self.deduper.is_new(evt):
                 print(f"[dedupe] skipped duplicate: {evt.fingerprint}")
                 return
 
-            print("[normalized]")
-            print(json.dumps(asdict(evt), ensure_ascii=False, indent=2, default=str))
+            # Update game clock
+            if evt.kind == "period":
+                if evt.subtype == "start":
+                    self.game_clock.start_period(evt.period or 1)
+                elif evt.subtype == "end":
+                    self.game_clock.end_period()
+            elif evt.kind == "timer" and evt.clock:
+                self.game_clock.update_clock(evt.clock)
+
+            # Display event
+            print(f"\n[event] {evt.kind} | {evt.subtype or ''}")
+            if evt.description:
+                print(f"  {evt.description}")
 
             # Enrich event with player names if metadata available
             if self.metadata and evt.player:
                 player_name = self.metadata.get_player_display_name(evt.player)
-                print(f"[player] {player_name}")
+                print(f"  [player] {player_name}")
 
+            # Generate commentary
             spoken = norwegian_commentary(evt, metadata=self.metadata)
             if spoken:
-                # Optionally enhance commentary with player names
-                if self.metadata and evt.player:
-                    player_name = self.metadata.get_player_name(evt.player)
-                    # Replace generic "spiller {id}" with actual name
-                    spoken = spoken.replace(f"spiller {evt.player}", player_name)
-
                 print(f"[commentary] {spoken}")
                 if self.tts:
                     self.tts.speak(spoken)
@@ -142,11 +203,69 @@ class MatchFeedListener(SubscribeCallback):
         """Handle MatchData event containing rosters and match info."""
         try:
             self.metadata = MatchMetadata.from_raw(raw_msg)
-            print("\n[metadata] Match data loaded:")
+            print("\n" + "=" * 60)
+            print("📋 MATCH METADATA LOADED")
+            print("=" * 60)
             print(self.metadata.to_summary())
-            print()
+            print("=" * 60 + "\n")
         except Exception as e:
             print(f"[error] Failed to parse match metadata: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def get_connection_status(self) -> dict:
+        """Get current connection status."""
+        time_since_last_event = time.time() - self.last_event_time
+        return {
+            "connected": self.is_connected,
+            "reconnect_count": self.reconnect_count,
+            "seconds_since_last_event": int(time_since_last_event),
+            "stale": time_since_last_event > 60,  # No events for 60 seconds
+        }
+
+
+# =========================
+# Connection Monitor
+# =========================
+
+
+class ConnectionMonitor:
+    """Monitor connection health and alert on issues."""
+
+    def __init__(self, listener: MatchFeedListener, check_interval: int = 30):
+        self.listener = listener
+        self.check_interval = check_interval
+        self.running = False
+        self.thread = None
+
+    def start(self):
+        """Start monitoring in background thread."""
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        """Stop monitoring."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2)
+
+    def _monitor_loop(self):
+        """Monitor connection status periodically."""
+        while self.running:
+            time.sleep(self.check_interval)
+
+            status = self.listener.get_connection_status()
+
+            if not status["connected"]:
+                print(
+                    f"\n⚠️  [monitor] Not connected (reconnect attempts: {status['reconnect_count']})"
+                )
+            elif status["stale"]:
+                print(
+                    f"\n⚠️  [monitor] No events received for {status['seconds_since_last_event']} seconds"
+                )
 
 
 # =========================
@@ -155,35 +274,48 @@ class MatchFeedListener(SubscribeCallback):
 
 
 def build_pubnub() -> PubNub:
+    """Build PubNub client with reconnection settings."""
     config = PNConfiguration()
     config.subscribe_key = SUBSCRIBE_KEY
-    config.uuid = f"gpt54-listener-{int(time.time())}"
+    config.uuid = f"basketsnakker-{int(time.time())}"
+
+    # Reconnection settings
+    config.reconnect_policy = PNReconnectionPolicy.LINEAR
+    config.maximum_reconnection_retries = -1  # Infinite retries
+    config.subscribe_request_timeout = 310
+    config.connect_timeout = 30
+    config.non_subscribe_request_timeout = 30
+
     return PubNub(config)
 
 
-def create_tts() -> BaseTTS:
+def create_tts() -> Optional[BaseTTS]:
     """Create appropriate TTS for the platform."""
     system = platform.system()
 
-    if system == "Windows":
-        from wintts import WindowsTTS
+    try:
+        if system == "Windows":
+            from wintts import WindowsTTS
 
-        return WindowsTTS()
-    elif system == "Darwin":  # macOS
-        from macostts import MacOSTTS
+            return WindowsTTS()
+        elif system == "Darwin":  # macOS
+            from macostts import MacOSTTS
 
-        return MacOSTTS()
-    elif system == "Linux":
-        from linuxtts import LinuxTTS
+            return MacOSTTS()
+        elif system == "Linux":
+            from linuxtts import LinuxTTS
 
-        return LinuxTTS(
-            model_path=None,
-            volume=1.0,
-            speed=1.0,
-            use_cuda=False,
-        )
-    else:
-        print(f"[warning] Unknown platform: {system}")
+            return LinuxTTS(
+                model_path=None,
+                volume=1.0,
+                speed=1.0,
+                use_cuda=False,
+            )
+        else:
+            print(f"[warning] Unknown platform: {system}")
+            return None
+    except ImportError as e:
+        print(f"[warning] Could not import TTS for {system}: {e}")
         return None
 
 
@@ -197,6 +329,10 @@ def main(match_id: int, silent: bool = False):
 
     pubnub.add_listener(listener)
 
+    # Start connection monitor
+    monitor = ConnectionMonitor(listener, check_interval=30)
+    monitor.start()
+
     channel = f"match:{match_id}:all"
     print(f"Subscribing to channel: {channel}")
     pubnub.subscribe().channels(channel).execute()
@@ -207,19 +343,18 @@ def main(match_id: int, silent: bool = False):
     # Start clock display
     game_clock.start_display()
 
-    def shutdown_handler(sig, frame):
-        print("\nShutting down...")
-        pubnub.unsubscribe_all()
-        pubnub.stop()
+    try:
+        # Keep main thread alive without blocking
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n\nShutting down...")
+    finally:
+        monitor.stop()
         game_clock.stop_display()
         listener.log_fp.close()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, shutdown_handler)
-    signal.signal(signal.SIGTERM, shutdown_handler)
-
-    while True:
-        time.sleep(1)
+        pubnub.stop()
+        print("Shutdown complete.")
 
 
 if __name__ == "__main__":

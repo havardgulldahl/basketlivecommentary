@@ -53,6 +53,17 @@ class GeniusBasketballNormalizer:
     TIMER_MATCH_END_CODES = {5}  # 5=Match end
     TIMER_UPDATE_CODES = {3}  # 3=Update
 
+    # Map PartialResultTypeId to period number
+    PERIOD_ID_MAP = {
+        200073: 1,  # 1. periode
+        200074: 2,  # 2. periode
+        200075: 3,  # 3. periode
+        200076: 4,  # 4. periode
+        # Add overtime periods if needed
+        # 200077: 5,  # OT1
+        # 200078: 6,  # OT2
+    }
+
     def normalize(self, envelope_message: Any) -> Optional[NormalizedEvent]:
         """
         PubNub SDK usually gives the message payload itself.
@@ -421,11 +432,8 @@ class GeniusBasketballNormalizer:
         return message
 
     def _extract_period(self, raw: dict) -> Optional[int]:
-        for key in ("Period", "CurrentPeriod", "Quarter"):
-            value = self._to_int(raw.get(key))
-            if value is not None:
-                return value
-        return None
+        period_id = raw.get("PartialResultTypeId")
+        return self.PERIOD_ID_MAP.get(period_id) if period_id else None
 
     def _extract_clock(self, raw: dict) -> Optional[str]:
         for key in ("Clock", "GameClock", "ClockTime", "Time", "PeriodTime"):
