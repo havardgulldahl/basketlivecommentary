@@ -1,6 +1,18 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from event_tokens import (
+    EventKind,
+    FoulSubtype,
+    MatchSubtype,
+    PeriodSubtype,
+    RawEventType,
+    ReboundSubtype,
+    ShotSubtype,
+    TimerSubtype,
+    to_enum,
+)
+
 
 @dataclass
 class NormalizedEvent:
@@ -23,76 +35,76 @@ class GeniusBasketballNormalizer:
     Custom parser/normalizer for raw Genius-style basketball payloads.
     """
 
-    # Shot result codes
+    # Shot result codes -> canonical shot subtype
     SHOT_RESULT_CODES = {
-        200437: ("1p", "made"),  # 1-point made (free throw) - alternative code
-        200438: ("2p", "made"),  # 2-point made
-        200439: ("3p", "made"),  # 3-point made
-        200440: ("1p", "miss"),  # 1-point miss (free throw)
-        200441: ("2p", "miss"),  # 2-point miss
-        200442: ("3p", "miss"),  # 3-point miss
-        200443: ("2p", "made"),  # 2-point made - confirmed
-        200444: ("1p", "made"),  # 1-point made (free throw) - confirmed
-        200445: ("1p", "penalty_miss"),  # Penalty shot miss
-        200446: ("1p", "penalty_made"),  # Penalty shot made (assumed)
+        200437: ShotSubtype.MADE_1P,  # 1-point made (free throw) - alternative
+        200438: ShotSubtype.MADE_2P,  # 2-point made
+        200439: ShotSubtype.MADE_3P,  # 3-point made
+        200440: ShotSubtype.MISSED_1P,  # 1-point miss (free throw)
+        200441: ShotSubtype.MISSED_2P,  # 2-point miss
+        200442: ShotSubtype.MISSED_3P,  # 3-point miss
+        200443: ShotSubtype.MADE_2P,  # 2-point made - confirmed
+        200444: ShotSubtype.MADE_1P,  # 1-point made (free throw) - confirmed
+        200445: ShotSubtype.PENALTY_MISS_1P,  # Penalty shot miss
+        200446: ShotSubtype.PENALTY_MADE_1P,  # Penalty shot made (assumed)
     }
 
     # Foul type codes
     FOUL_TYPE_CODES = {
-        200448: "defensive",  # Defensive foul (non-shooting)
-        200449: "offensive",  # Offensive foul
-        200450: "technical",  # Technical foul (assumed)
-        200451: "flagrant",  # Flagrant foul (assumed)
-        200461: "shooting",  # Shooting foul (defensive foul resulting in free throws)
+        200448: FoulSubtype.DEFENSIVE,
+        200449: FoulSubtype.OFFENSIVE,
+        200450: FoulSubtype.TECHNICAL,
+        200451: FoulSubtype.FLAGRANT,
+        200461: FoulSubtype.SHOOTING,
     }
 
-    # Timer type codes
-    TIMER_START_CODES = {1, 6}  # 1=Start, 6=Period start
-    TIMER_STOP_CODES = {2}  # 2=Stop
-    TIMER_END_CODES = {7}  # 7=Period end
-    TIMER_MATCH_END_CODES = {5}  # 5=Match end
-    TIMER_UPDATE_CODES = {3}  # 3=Update
+    # Timer type mapping
+    TIMER_TYPE_MAP = {
+        1: (EventKind.TIMER, TimerSubtype.START),  # Start
+        2: (EventKind.TIMER, TimerSubtype.STOP),  # Stop
+        3: (EventKind.TIMER, TimerSubtype.UPDATE),  # Update
+        5: (EventKind.MATCH, MatchSubtype.END),  # Match end
+        6: (EventKind.PERIOD, PeriodSubtype.PERIOD_START),  # Period start
+        7: (EventKind.PERIOD, PeriodSubtype.END),  # Period end
+    }
 
     # Map PartialResultTypeId to period number
     PERIOD_ID_MAP = {
-        200073: 1,  # 1. periode
-        200074: 2,  # 2. periode
-        200075: 3,  # 3. periode
-        200076: 4,  # 4. periode
-        # Add overtime periods if needed
+        200073: 1,
+        200074: 2,
+        200075: 3,
+        200076: 4,
         # 200077: 5,  # OT1
         # 200078: 6,  # OT2
     }
 
     def normalize(self, envelope_message: Any) -> Optional[NormalizedEvent]:
-        """
-        PubNub SDK usually gives the message payload itself.
-        Some feeds may wrap the actual event inside 'd'.
-        """
         raw = self._extract_payload(envelope_message)
         if not isinstance(raw, dict):
             return None
 
-        raw_type = raw.get("MatchEventType")
+        raw_type_value = raw.get("MatchEventType")
+        raw_type = to_enum(raw_type_value, RawEventType)
+
         match_id = self._to_int(raw.get("MatchId"))
         team = raw.get("Team")
         player = raw.get("Player")
         period = self._extract_period(raw)
         clock = self._extract_clock(raw)
 
-        if raw_type == "Shot":
+        if raw_type == RawEventType.SHOT:
             return self._normalize_shot(raw, match_id, team, player, period, clock)
 
-        if raw_type == "Foul":
+        if raw_type == RawEventType.FOUL:
             return self._normalize_foul(raw, match_id, team, player, period, clock)
 
-        if raw_type == "DefensiveRebound":
+        if raw_type == RawEventType.DEFENSIVE_REBOUND:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type=raw_type,
-                kind="rebound",
-                subtype="defensive",
+                kind=EventKind.REBOUND,
+                subtype=ReboundSubtype.DEFENSIVE,
                 team=team,
                 player=player,
                 points=None,
@@ -105,13 +117,13 @@ class GeniusBasketballNormalizer:
                 ),
             )
 
-        if raw_type == "OffensiveRebound":
+        if raw_type == RawEventType.OFFENSIVE_REBOUND:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type=raw_type,
-                kind="rebound",
-                subtype="offensive",
+                kind=EventKind.REBOUND,
+                subtype=ReboundSubtype.OFFENSIVE,
                 team=team,
                 player=player,
                 points=None,
@@ -123,12 +135,13 @@ class GeniusBasketballNormalizer:
                     else "Offensive rebound"
                 ),
             )
-        if raw_type == "Turnover":
+
+        if raw_type == RawEventType.TURNOVER:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type=raw_type,
-                kind="turnover",
+                kind=EventKind.TURNOVER,
                 subtype=None,
                 team=team,
                 player=player,
@@ -140,15 +153,15 @@ class GeniusBasketballNormalizer:
                 ),
             )
 
-        if raw_type == "Timer":
+        if raw_type == RawEventType.TIMER:
             return self._normalize_timer(raw, match_id, team, player, period, clock)
 
-        if raw_type == "Timeout":
+        if raw_type == RawEventType.TIMEOUT:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type=raw_type,
-                kind="timeout",
+                kind=EventKind.TIMEOUT,
                 subtype=None,
                 team=team,
                 player=player,
@@ -160,13 +173,12 @@ class GeniusBasketballNormalizer:
                 ),
             )
 
-        if raw_type == "MatchData":
-            # This is match metadata (rosters, etc.) - usually ignore for commentary
+        if raw_type == RawEventType.MATCH_DATA:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
                 raw_type=raw_type,
-                kind="match_data",
+                kind=EventKind.MATCH_DATA,
                 subtype=None,
                 team=team,
                 player=player,
@@ -179,15 +191,15 @@ class GeniusBasketballNormalizer:
         return self._build_event(
             raw=raw,
             match_id=match_id,
-            raw_type=raw_type,
-            kind="unknown",
+            raw_type=raw_type_value,
+            kind=EventKind.UNKNOWN,
             subtype=None,
             team=team,
             player=player,
             points=None,
             period=period,
             clock=clock,
-            description=f"Unknown event type: {raw_type}",
+            description=f"Unknown event type: {raw_type_value}",
         )
 
     def _normalize_foul(
@@ -203,16 +215,14 @@ class GeniusBasketballNormalizer:
         foul_severity = self._to_int(raw.get("FoulSeverity"))
         is_coach = raw.get("IsCoach", False)
 
-        # Look up foul type
-        foul_type = self.FOUL_TYPE_CODES.get(foul_type_code, "personal")
+        foul_type = self.FOUL_TYPE_CODES.get(foul_type_code, FoulSubtype.PERSONAL)
 
-        # Build description
         if is_coach:
             desc = f"Foul on coach (team {team})" if team else "Foul on coach"
         elif player is not None:
-            desc = f"{foul_type.capitalize()} foul on player {player}"
+            desc = f"{foul_type.value.capitalize()} foul on player {player}"
         else:
-            desc = f"{foul_type.capitalize()} foul"
+            desc = f"{foul_type.value.capitalize()} foul"
 
         if foul_severity and foul_severity > 0:
             desc += f" (severity: {foul_severity})"
@@ -220,8 +230,8 @@ class GeniusBasketballNormalizer:
         return self._build_event(
             raw=raw,
             match_id=match_id,
-            raw_type="Foul",
-            kind="foul",
+            raw_type=RawEventType.FOUL,
+            kind=EventKind.FOUL,
             subtype=foul_type,
             team=team,
             player=player,
@@ -241,78 +251,66 @@ class GeniusBasketballNormalizer:
         clock: Optional[str],
     ) -> NormalizedEvent:
         shot_result_code = self._to_int(raw.get("ShotResult"))
+        shot_subtype = self.SHOT_RESULT_CODES.get(shot_result_code)
 
-        # Look up shot type and result
-        shot_info = self.SHOT_RESULT_CODES.get(shot_result_code)
-
-        if shot_info:
-            shot_type, result = shot_info
-
-            # Determine points
-            points = None
-            if result in ("made", "penalty_made"):
-                if shot_type == "1p":
-                    points = 1
-                elif shot_type == "2p":
-                    points = 2
-                elif shot_type == "3p":
-                    points = 3
-
-            # Build subtype
-            subtype = f"{result}_{shot_type}"
-
-            # Build description
-            if result in ("made", "penalty_made"):
-                desc = (
-                    f"Made {points}-point shot by player {player}"
-                    if points and player is not None
-                    else (
-                        f"Made shot by player {player}"
-                        if player is not None
-                        else "Made shot"
-                    )
-                )
-            elif result == "blocked":
-                desc = (
-                    f"Shot blocked (player {player})"
-                    if player is not None
-                    else "Shot blocked"
-                )
-            else:  # miss or penalty_miss
-                point_desc = shot_type.replace("p", "-point")
-                desc = (
-                    f"Missed {point_desc} shot by player {player}"
-                    if player is not None
-                    else f"Missed {point_desc} shot"
-                )
-
+        if shot_subtype is None:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
-                raw_type="Shot",
-                kind="shot",
-                subtype=subtype,
+                raw_type=RawEventType.SHOT,
+                kind=EventKind.SHOT,
+                subtype=ShotSubtype.UNKNOWN_RESULT,
                 team=team,
                 player=player,
-                points=points,
+                points=None,
                 period=period,
                 clock=clock,
-                description=desc,
+                description=f"Shot with unknown result code {shot_result_code}",
             )
 
-        # Unknown shot result code
+        points = self._points_from_shot_subtype(shot_subtype)
+
+        if shot_subtype in {
+            ShotSubtype.MADE_1P,
+            ShotSubtype.MADE_2P,
+            ShotSubtype.MADE_3P,
+            ShotSubtype.PENALTY_MADE_1P,
+        }:
+            desc = (
+                f"Made {points}-point shot by player {player}"
+                if points and player is not None
+                else (
+                    f"Made shot by player {player}"
+                    if player is not None
+                    else "Made shot"
+                )
+            )
+        elif shot_subtype == ShotSubtype.BLOCKED:
+            desc = (
+                f"Shot blocked (player {player})"
+                if player is not None
+                else "Shot blocked"
+            )
+        else:
+            point_desc = self._miss_description_for_shot(shot_subtype)
+            desc = (
+                f"Missed {point_desc} shot by player {player}"
+                if player is not None
+                else f"Missed {point_desc} shot"
+            )
+
         return self._build_event(
             raw=raw,
             match_id=match_id,
-            raw_type="Shot",
-            kind="shot",
-            subtype="unknown_result",
+            raw_type=RawEventType.SHOT,
+            kind=EventKind.SHOT,
+            subtype=shot_subtype,
             team=team,
             player=player,
-            points=None,
+            points=points,
             period=period,
             clock=clock,
-            description=f"Shot with unknown result code {shot_result_code}",
+            description=desc,
         )
 
     def _normalize_timer(
@@ -325,101 +323,54 @@ class GeniusBasketballNormalizer:
         clock: Optional[str],
     ) -> NormalizedEvent:
         timer_type = self._to_int(raw.get("Type"))
+        mapped = self.TIMER_TYPE_MAP.get(timer_type)
 
-        if timer_type in self.TIMER_START_CODES:
-            subtype = "period_start" if timer_type == 6 else "start"
+        if mapped is None:
             return self._build_event(
                 raw=raw,
                 match_id=match_id,
-                raw_type="Timer",
-                kind="period" if timer_type == 6 else "timer",
-                subtype=subtype,
+                raw_type=RawEventType.TIMER,
+                kind=EventKind.TIMER,
+                subtype=TimerSubtype.UNKNOWN,
                 team=team,
                 player=player,
                 points=None,
                 period=period,
                 clock=clock,
-                description=(
-                    f"Start of period {period}"
-                    if timer_type == 6 and period is not None
-                    else "Clock start"
-                ),
+                description=f"Timer event type {timer_type}",
             )
 
-        if timer_type in self.TIMER_STOP_CODES:
-            return self._build_event(
-                raw=raw,
-                match_id=match_id,
-                raw_type="Timer",
-                kind="timer",
-                subtype="stop",
-                team=team,
-                player=player,
-                points=None,
-                period=period,
-                clock=clock,
-                description="Clock stop",
-            )
+        kind, subtype = mapped
 
-        if timer_type in self.TIMER_END_CODES:
-            return self._build_event(
-                raw=raw,
-                match_id=match_id,
-                raw_type="Timer",
-                kind="period",
-                subtype="end",
-                team=team,
-                player=player,
-                points=None,
-                period=period,
-                clock=clock,
-                description=(
-                    f"End of period {period}" if period is not None else "Period end"
-                ),
+        if kind == EventKind.PERIOD and subtype == PeriodSubtype.PERIOD_START:
+            description = (
+                f"Start of period {period}" if period is not None else "Start of period"
             )
-
-        if timer_type in self.TIMER_MATCH_END_CODES:
-            return self._build_event(
-                raw=raw,
-                match_id=match_id,
-                raw_type="Timer",
-                kind="match",
-                subtype="end",
-                team=team,
-                player=player,
-                points=None,
-                period=period,
-                clock=clock,
-                description="Match end",
+        elif kind == EventKind.PERIOD and subtype == PeriodSubtype.END:
+            description = (
+                f"End of period {period}" if period is not None else "Period end"
             )
-
-        if timer_type in self.TIMER_UPDATE_CODES:
-            return self._build_event(
-                raw=raw,
-                match_id=match_id,
-                raw_type="Timer",
-                kind="timer",
-                subtype="update",
-                team=team,
-                player=player,
-                points=None,
-                period=period,
-                clock=clock,
-                description="Timer update",
-            )
+        elif kind == EventKind.MATCH and subtype == MatchSubtype.END:
+            description = "Match end"
+        elif kind == EventKind.TIMER and subtype == TimerSubtype.START:
+            description = "Clock start"
+        elif kind == EventKind.TIMER and subtype == TimerSubtype.STOP:
+            description = "Clock stop"
+        else:
+            description = "Timer update"
 
         return self._build_event(
             raw=raw,
             match_id=match_id,
-            raw_type="Timer",
-            kind="timer",
-            subtype="unknown",
+            raw_type=RawEventType.TIMER,
+            kind=kind,
+            subtype=subtype,
             team=team,
             player=player,
             points=None,
             period=period,
             clock=clock,
-            description=f"Timer event type {timer_type}",
+            description=description,
         )
 
     def _extract_payload(self, message: Any) -> Any:
@@ -432,8 +383,8 @@ class GeniusBasketballNormalizer:
         return message
 
     def _extract_period(self, raw: dict) -> Optional[int]:
-        period_id = raw.get("PartialResultTypeId")
-        return self.PERIOD_ID_MAP.get(period_id) if period_id else None
+        period_id = self._to_int(raw.get("PartialResultTypeId"))
+        return self.PERIOD_ID_MAP.get(period_id) if period_id is not None else None
 
     def _extract_clock(self, raw: dict) -> Optional[str]:
         for key in ("Clock", "GameClock", "ClockTime", "Time", "PeriodTime"):
@@ -446,9 +397,9 @@ class GeniusBasketballNormalizer:
         self,
         raw: dict,
         match_id: Optional[int],
-        raw_type: Optional[str],
-        kind: str,
-        subtype: Optional[str],
+        raw_type: Optional[object],
+        kind: EventKind,
+        subtype: Optional[object],
         team: Any,
         player: Any,
         points: Optional[int],
@@ -456,14 +407,28 @@ class GeniusBasketballNormalizer:
         clock: Optional[str],
         description: str,
     ) -> NormalizedEvent:
+        raw_type_value = raw_type.value if hasattr(raw_type, "value") else raw_type
+        kind_value = kind.value if hasattr(kind, "value") else str(kind)
+        subtype_value = subtype.value if hasattr(subtype, "value") else subtype
+
         fingerprint = self._fingerprint(
-            raw, match_id, raw_type, kind, subtype, team, player, points, period, clock
+            raw,
+            match_id,
+            raw_type_value,
+            kind_value,
+            subtype_value,
+            team,
+            player,
+            points,
+            period,
+            clock,
         )
+
         return NormalizedEvent(
             match_id=match_id,
-            raw_type=raw_type,
-            kind=kind,
-            subtype=subtype,
+            raw_type=raw_type_value,
+            kind=kind_value,
+            subtype=subtype_value,
             team=team,
             player=player,
             points=points,
@@ -487,9 +452,6 @@ class GeniusBasketballNormalizer:
         period: Optional[int],
         clock: Optional[str],
     ) -> str:
-        """
-        Prefer real IDs if present. Fall back to a composite key.
-        """
         event_id = raw.get("EventId") or raw.get("Id") or raw.get("MessageId")
         if event_id is not None:
             return f"id:{event_id}"
@@ -500,6 +462,7 @@ class GeniusBasketballNormalizer:
             or raw.get("Utc")
             or raw.get("ServerTimeStamp")
         )
+
         return "|".join(
             [
                 str(match_id),
@@ -522,3 +485,21 @@ class GeniusBasketballNormalizer:
             return int(value)
         except (ValueError, TypeError):
             return None
+
+    def _points_from_shot_subtype(self, subtype: ShotSubtype) -> Optional[int]:
+        if subtype in {ShotSubtype.MADE_1P, ShotSubtype.PENALTY_MADE_1P}:
+            return 1
+        if subtype == ShotSubtype.MADE_2P:
+            return 2
+        if subtype == ShotSubtype.MADE_3P:
+            return 3
+        return None
+
+    def _miss_description_for_shot(self, subtype: ShotSubtype) -> str:
+        if subtype in {ShotSubtype.MISSED_1P, ShotSubtype.PENALTY_MISS_1P}:
+            return "1-point"
+        if subtype == ShotSubtype.MISSED_2P:
+            return "2-point"
+        if subtype == ShotSubtype.MISSED_3P:
+            return "3-point"
+        return "unknown"
