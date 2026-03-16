@@ -172,7 +172,7 @@ class LinuxTTS(BaseTTS):
         print("[tts] No audio player found (tried aplay, paplay, ffplay)")
 
 
-class LinuxTTSStreaming:
+class LinuxTTSStreaming(LinuxTTS):
     """
     Streaming version using Piper's synthesize method for lower latency.
     Requires pyaudio for audio playback.
@@ -180,6 +180,7 @@ class LinuxTTSStreaming:
 
     def __init__(
         self,
+        language: str = "no",
         model_path: Optional[str] = None,
         volume: float = 1.0,
         speed: float = 1.0,
@@ -199,14 +200,15 @@ class LinuxTTSStreaming:
 
         self.volume = volume
         self.speed = speed
+        self.language = language
 
         # Find or use provided model
         if model_path is None:
-            model_path = self._find_norwegian_voice()
+            model_path = self._find_voice(language)
 
         if not model_path or not os.path.exists(model_path):
             raise RuntimeError(
-                "No Piper voice model found. Download Norwegian voice:\n"
+                f"No Piper voice model found for language '{language}'. Download Norwegian voice:\n"
                 "  python3 -m piper.download_voices no_NO-talesyntese-medium"
             )
 
@@ -224,25 +226,6 @@ class LinuxTTSStreaming:
         # Initialize audio output
         self.audio = self.pyaudio.PyAudio()
         self.stream = None
-
-    def _find_norwegian_voice(self) -> Optional[str]:
-        """Try to find a Norwegian voice model."""
-        possible_paths = [
-            Path.home() / ".local" / "share" / "piper-tts" / "voices",
-            Path("/usr/share/piper-tts/voices"),
-            Path("./voices"),
-        ]
-
-        for base_path in possible_paths:
-            if base_path.exists():
-                for model_file in base_path.rglob("*.onnx"):
-                    if (
-                        "no_" in model_file.name.lower()
-                        or "norwegian" in model_file.name.lower()
-                    ):
-                        return str(model_file)
-
-        return None
 
     def speak(self, text: str):
         """Speak the given text with streaming."""
