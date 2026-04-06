@@ -15,7 +15,7 @@ from pubnub.pnconfig import PNConfiguration  # Fixed import
 from pubnub.pubnub import PubNub
 
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
-from commentary import norwegian_commentary
+from commentary import get_commentary
 from game_clock import GameClock
 from match_metadata import MatchMetadata
 from tts import BaseTTS
@@ -65,12 +65,14 @@ class MatchFeedListener(SubscribeCallback):
         deduper: RecentEventDeduper,
         tts: Optional[BaseTTS],
         game_clock: GameClock,
+        language: str = "no",
     ):
         super().__init__()
         self.normalizer = normalizer
         self.deduper = deduper
         self.game_clock = game_clock
         self.tts = tts
+        self.language = language
         self.metadata: Optional[MatchMetadata] = None
 
         # Open log file with timestamp
@@ -185,7 +187,7 @@ class MatchFeedListener(SubscribeCallback):
                 print(f"  [player] {player_name}")
 
             # Generate commentary
-            spoken = norwegian_commentary(evt, metadata=self.metadata)
+            spoken = get_commentary(evt, metadata=self.metadata, language=self.language)
             if spoken:
                 print(f"[commentary] {spoken}")
                 if self.tts:
@@ -326,7 +328,7 @@ def main(match_id: int, silent: bool = False, language: str = "no"):
     deduper = RecentEventDeduper(maxlen=500)
     tts = create_tts(language=language) if not silent else None
     game_clock = GameClock()
-    listener = MatchFeedListener(normalizer, deduper, tts, game_clock)
+    listener = MatchFeedListener(normalizer, deduper, tts, game_clock, language=language)
 
     pubnub.add_listener(listener)
 
