@@ -23,9 +23,9 @@ sudo apt install alsa-utils  # for aplay
 try:
     from piper import PiperVoice
     from piper.voice import SynthesisConfig
+    _piper_available = True
 except ImportError:
-    print(help)
-    sys.exit(1)
+    _piper_available = False
 
 from tts import BaseTTS
 
@@ -42,6 +42,7 @@ class LinuxTTS(BaseTTS):
         volume: float = 1.0,
         speed: float = 1.0,
         use_cuda: bool = False,
+        test_mode: bool = False,
     ):
         """
         Initialize Linux TTS with Piper.
@@ -52,10 +53,22 @@ class LinuxTTS(BaseTTS):
             volume: Volume level (0.0 to 1.0+)
             speed: Speech speed multiplier (1.0 = normal, 2.0 = twice as slow)
             use_cuda: Use GPU acceleration if available
+            test_mode: If True, print debug info but don't actually speak
         """
         self.language = language
         self.volume = volume
         self.speed = speed
+        self.test_mode = test_mode
+        self.voice = None
+        self.syn_config = None
+
+        if test_mode:
+            print("[linuxtts] TEST MODE - will not actually speak")
+            return
+
+        if not _piper_available:
+            print(help)
+            sys.exit(1)
 
         # Find or use provided model
         if model_path is None:
@@ -106,6 +119,10 @@ class LinuxTTS(BaseTTS):
     def speak(self, text: str):
         """Speak the given text using Piper TTS."""
         if not text:
+            return
+
+        if self.test_mode:
+            print(f"[linuxtts] TEST MODE - would speak: '{text}'")
             return
 
         try:
@@ -261,3 +278,33 @@ class LinuxTTSStreaming:
             self.stream.close()
         if self.audio:
             self.audio.terminate()
+
+
+def test_tts():
+    """Test the TTS engine with diagnostic output."""
+    import time
+
+    print("\n" + "=" * 60)
+    print("Linux TTS Test")
+    print("=" * 60 + "\n")
+
+    print("Testing in TEST MODE:\n")
+    tts = LinuxTTS(test_mode=True)
+
+    test_phrases = [
+        "Testing one two three",
+        "Skudd fra Johnsen",
+        "Tre poeng for laget",
+    ]
+
+    for phrase in test_phrases:
+        print(f"\n>>> Speaking: '{phrase}'")
+        tts.speak(phrase)
+
+    print("\n" + "=" * 60)
+    print("Test complete!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    test_tts()
