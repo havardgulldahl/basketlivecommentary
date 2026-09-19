@@ -1,0 +1,22 @@
+[project]
+name = "basketsnakker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Håvard Gulldahl", email = "havard.gulldahl@nrk.no" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "llm>=0.24",
+    "llm-ollama>=0.6",
+    "piper-tts>=1.8",
+    "pubnub>=7.0.0,<10",
+]
+
+[project.scripts]
+basketsnakker = "basketsnakker:main"
+
+[build-system]
+requires = ["uv_build>=0.12.14,<0.13.0"]
+build-backend = "uv_build"

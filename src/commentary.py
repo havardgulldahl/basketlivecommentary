@@ -55,11 +55,44 @@ class CommentaryGenerator(ABC):
         }
 
         handler = dispatch.get(kind)
-        return handler(evt) if handler else None
+        spoken = handler(evt) if handler else None
+        score_line = self.score_commentary(evt)
+        if score_line:
+            spoken = f"{spoken} {score_line}" if spoken else score_line
+        return spoken
+
+    def score_commentary(self, evt: NormalizedEvent) -> Optional[str]:
+        if evt.home_score is None or evt.away_score is None:
+            return None
+
+        home_name = self.team_name("H")
+        away_name = self.team_name("A")
+        if evt.home_score == evt.away_score:
+            return self.score_tie_line(home_name, away_name, evt.home_score)
+
+        if evt.home_score > evt.away_score:
+            leader_name, leader_score = home_name, evt.home_score
+            trailing_score = evt.away_score
+        else:
+            leader_name, leader_score = away_name, evt.away_score
+            trailing_score = evt.home_score
+        return self.score_lead_line(leader_name, leader_score, trailing_score)
+
+    @abstractmethod
+    def score_tie_line(self, home_name: str, away_name: str, score: int) -> str:
+        pass
+
+    @abstractmethod
+    def score_lead_line(
+        self, leader_name: str, leader_score: int, trailing_score: int
+    ) -> str:
+        pass
 
     def player_name(self, player_id: Optional[int]) -> str:
         if self.metadata and player_id:
-            return self.metadata.get_player_name(player_id)
+            player = self.metadata.get_player(player_id)
+            if player:
+                return player.full_name
         return self.fallback_player_name(player_id)
 
     def team_name(self, team_code: Optional[str]) -> str:
@@ -117,10 +150,18 @@ class NorwegianCommentary(CommentaryGenerator):
         return "Norwegian"
 
     def fallback_player_name(self, player_id: Optional[int]) -> str:
-        return f"spiller {player_id}" if player_id else "ukjent spiller"
+        return "ukjent spiller"
 
     def fallback_team_name(self, team_code: Optional[str]) -> str:
-        return f"lag {team_code}" if team_code else "ukjent lag"
+        return {"H": "hjemmelaget", "A": "bortelaget"}.get(team_code, "ukjent lag")
+
+    def score_tie_line(self, home_name: str, away_name: str, score: int) -> str:
+        return f"Stillingen er {score}-{score} mellom {home_name} og {away_name}."
+
+    def score_lead_line(
+        self, leader_name: str, leader_score: int, trailing_score: int
+    ) -> str:
+        return f"Stillingen er {leader_score}-{trailing_score}, og {leader_name} leder."
 
     def comment_timer(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, TimerSubtype)
@@ -133,40 +174,40 @@ class NorwegianCommentary(CommentaryGenerator):
     def comment_shot(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, ShotSubtype)
         mapping = {
-            ShotSubtype.MADE_2P: f"To poeng fra {self.player_name(evt.player)}.",
-            ShotSubtype.MADE_3P: f"Tre poeng! {self.player_name(evt.player)} skårer fra distanse.",
-            ShotSubtype.MADE_1P: f"Straffekast inne av {self.player_name(evt.player)}.",
-            ShotSubtype.PENALTY_MADE_1P: f"Straffekast inne av {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_2P: f"Bom på topoenger av {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_3P: f"Trepoengsforsøk bom av {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_1P: f"{self.player_name(evt.player)} bommet på straffekastet.",
-            ShotSubtype.PENALTY_MISS_1P: f"{self.player_name(evt.player)} bommet på straffe.",
-            ShotSubtype.BLOCKED: f"Blokkert skudd av {self.player_name(evt.player)}.",
+            ShotSubtype.MADE_2P: f"To poeng fra {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MADE_3P: f"Tre poeng! {self.player_name(evt.player)} skårer for {self.team_name(evt.team)}.",
+            ShotSubtype.MADE_1P: f"Straffekast inne av {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.PENALTY_MADE_1P: f"Straffekast inne av {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_2P: f"{self.player_name(evt.player)} bommer på topoengeren for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_3P: f"{self.player_name(evt.player)} bommer på trepoengeren for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_1P: f"{self.player_name(evt.player)} bommet på straffekastet for {self.team_name(evt.team)}.",
+            ShotSubtype.PENALTY_MISS_1P: f"{self.player_name(evt.player)} bommet på straffe for {self.team_name(evt.team)}.",
+            ShotSubtype.BLOCKED: f"Blokkert skudd av {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
     def comment_rebound(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, ReboundSubtype)
         mapping = {
-            ReboundSubtype.DEFENSIVE: f"Defensiv retur til {self.player_name(evt.player)}.",
-            ReboundSubtype.OFFENSIVE: f"Offensiv retur til {self.player_name(evt.player)}.",
+            ReboundSubtype.DEFENSIVE: f"Defensiv retur til {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ReboundSubtype.OFFENSIVE: f"Offensiv retur til {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
     def comment_foul(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, FoulSubtype)
         mapping = {
-            FoulSubtype.PERSONAL: f"Personlig feil på {self.player_name(evt.player)}.",
-            FoulSubtype.DEFENSIVE: f"Defensiv feil på {self.player_name(evt.player)}.",
-            FoulSubtype.OFFENSIVE: f"Offensiv feil på {self.player_name(evt.player)}.",
-            FoulSubtype.TECHNICAL: f"Teknisk feil på {self.player_name(evt.player)}.",
-            FoulSubtype.UNSPORTSMANLIKE: f"Usportslig feil på {self.player_name(evt.player)}.",
-            FoulSubtype.FLAGRANT: f"Grov feil på {self.player_name(evt.player)}.",
+            FoulSubtype.PERSONAL: f"Personlig feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.DEFENSIVE: f"Defensiv feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.OFFENSIVE: f"Offensiv feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.TECHNICAL: f"Teknisk feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.UNSPORTSMANLIKE: f"Usportslig feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.FLAGRANT: f"Grov feil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
             FoulSubtype.DISQUALIFYING: (
                 f"Diskvalifiserende feil! {self.player_name(evt.player)} er ute av kampen."
             ),
             FoulSubtype.TEAM: f"Lagfeil på {self.team_name(evt.team)}.",
-            FoulSubtype.SHOOTING: f"Skuddfeil på {self.player_name(evt.player)}.",
+            FoulSubtype.SHOOTING: f"Skuddfeil på {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
@@ -174,7 +215,9 @@ class NorwegianCommentary(CommentaryGenerator):
         return f"Timeout til {self.team_name(evt.team)}."
 
     def comment_turnover(self, evt: NormalizedEvent) -> Optional[str]:
-        return f"Balltap av {self.player_name(evt.player)}."
+        return (
+            f"Balltap av {self.player_name(evt.player)} for {self.team_name(evt.team)}."
+        )
 
     def comment_period(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, PeriodSubtype)
@@ -196,10 +239,20 @@ class EnglishCommentary(CommentaryGenerator):
         return "English"
 
     def fallback_player_name(self, player_id: Optional[int]) -> str:
-        return f"player {player_id}" if player_id else "unknown player"
+        return "unknown player"
 
     def fallback_team_name(self, team_code: Optional[str]) -> str:
-        return f"team {team_code}" if team_code else "unknown team"
+        return {"H": "the home team", "A": "the away team"}.get(
+            team_code, "unknown team"
+        )
+
+    def score_tie_line(self, home_name: str, away_name: str, score: int) -> str:
+        return f"The score is {score}-{score} between {home_name} and {away_name}."
+
+    def score_lead_line(
+        self, leader_name: str, leader_score: int, trailing_score: int
+    ) -> str:
+        return f"The score is {leader_score}-{trailing_score}, with {leader_name} in front."
 
     def comment_timer(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, TimerSubtype)
@@ -212,40 +265,40 @@ class EnglishCommentary(CommentaryGenerator):
     def comment_shot(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, ShotSubtype)
         mapping = {
-            ShotSubtype.MADE_2P: f"Two points from {self.player_name(evt.player)}.",
-            ShotSubtype.MADE_3P: f"Three points! {self.player_name(evt.player)} scores from downtown.",
-            ShotSubtype.MADE_1P: f"Free throw made by {self.player_name(evt.player)}.",
-            ShotSubtype.PENALTY_MADE_1P: f"Free throw made by {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_2P: f"Missed two-pointer by {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_3P: f"Three-point attempt misses by {self.player_name(evt.player)}.",
-            ShotSubtype.MISSED_1P: f"{self.player_name(evt.player)} misses the free throw.",
-            ShotSubtype.PENALTY_MISS_1P: f"{self.player_name(evt.player)} missed the free throw.",
-            ShotSubtype.BLOCKED: f"Shot blocked by {self.player_name(evt.player)}.",
+            ShotSubtype.MADE_2P: f"Two points from {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MADE_3P: f"Three points! {self.player_name(evt.player)} scores for {self.team_name(evt.team)}.",
+            ShotSubtype.MADE_1P: f"Free throw made by {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.PENALTY_MADE_1P: f"Free throw made by {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_2P: f"Missed two-pointer by {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_3P: f"Three-point attempt misses by {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ShotSubtype.MISSED_1P: f"{self.player_name(evt.player)} misses the free throw for {self.team_name(evt.team)}.",
+            ShotSubtype.PENALTY_MISS_1P: f"{self.player_name(evt.player)} missed the free throw for {self.team_name(evt.team)}.",
+            ShotSubtype.BLOCKED: f"Shot blocked by {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
     def comment_rebound(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, ReboundSubtype)
         mapping = {
-            ReboundSubtype.DEFENSIVE: f"Defensive rebound to {self.player_name(evt.player)}.",
-            ReboundSubtype.OFFENSIVE: f"Offensive rebound to {self.player_name(evt.player)}.",
+            ReboundSubtype.DEFENSIVE: f"Defensive rebound to {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            ReboundSubtype.OFFENSIVE: f"Offensive rebound to {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
     def comment_foul(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, FoulSubtype)
         mapping = {
-            FoulSubtype.PERSONAL: f"Personal foul on {self.player_name(evt.player)}.",
-            FoulSubtype.DEFENSIVE: f"Defensive foul on {self.player_name(evt.player)}.",
-            FoulSubtype.OFFENSIVE: f"Offensive foul on {self.player_name(evt.player)}.",
-            FoulSubtype.TECHNICAL: f"Technical foul on {self.player_name(evt.player)}.",
-            FoulSubtype.UNSPORTSMANLIKE: f"Unsportsmanlike foul on {self.player_name(evt.player)}.",
-            FoulSubtype.FLAGRANT: f"Flagrant foul on {self.player_name(evt.player)}.",
+            FoulSubtype.PERSONAL: f"Personal foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.DEFENSIVE: f"Defensive foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.OFFENSIVE: f"Offensive foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.TECHNICAL: f"Technical foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.UNSPORTSMANLIKE: f"Unsportsmanlike foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
+            FoulSubtype.FLAGRANT: f"Flagrant foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
             FoulSubtype.DISQUALIFYING: (
                 f"Disqualifying foul! {self.player_name(evt.player)} is ejected from the game."
             ),
             FoulSubtype.TEAM: f"Team foul on {self.team_name(evt.team)}.",
-            FoulSubtype.SHOOTING: f"Shooting foul on {self.player_name(evt.player)}.",
+            FoulSubtype.SHOOTING: f"Shooting foul on {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
         return mapping.get(subtype)
 
@@ -253,7 +306,7 @@ class EnglishCommentary(CommentaryGenerator):
         return f"Timeout called by {self.team_name(evt.team)}."
 
     def comment_turnover(self, evt: NormalizedEvent) -> Optional[str]:
-        return f"Turnover by {self.player_name(evt.player)}."
+        return f"Turnover by {self.player_name(evt.player)} for {self.team_name(evt.team)}."
 
     def comment_period(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, PeriodSubtype)
@@ -287,3 +340,17 @@ def get_commentary(
         generator = NorwegianCommentary(metadata)
 
     return generator.generate(evt)
+
+
+def get_score_commentary(
+    evt: NormalizedEvent,
+    metadata: Optional[MatchMetadata] = None,
+    language: str = Language.NO.value,
+) -> Optional[str]:
+    lang = to_enum((language or Language.NO.value).lower(), Language)
+    generator = (
+        EnglishCommentary(metadata)
+        if lang == Language.EN
+        else NorwegianCommentary(metadata)
+    )
+    return generator.score_commentary(evt) if evt.score_announcement else None

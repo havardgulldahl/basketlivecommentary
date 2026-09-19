@@ -28,6 +28,9 @@ class NormalizedEvent:
     description: str
     fingerprint: str
     raw: dict
+    home_score: Optional[int] = None
+    away_score: Optional[int] = None
+    score_announcement: bool = False
 
 
 class GeniusBasketballNormalizer:
@@ -37,16 +40,12 @@ class GeniusBasketballNormalizer:
 
     # Shot result codes -> canonical shot subtype
     SHOT_RESULT_CODES = {
-        200437: ShotSubtype.MADE_1P,  # 1-point made (free throw) - alternative
-        200438: ShotSubtype.MADE_2P,  # 2-point made
-        200439: ShotSubtype.MADE_3P,  # 3-point made
-        200440: ShotSubtype.MISSED_1P,  # 1-point miss (free throw)
-        200441: ShotSubtype.MISSED_2P,  # 2-point miss
-        200442: ShotSubtype.MISSED_3P,  # 3-point miss
-        200443: ShotSubtype.MADE_2P,  # 2-point made - confirmed
-        200444: ShotSubtype.MADE_1P,  # 1-point made (free throw) - confirmed
-        200445: ShotSubtype.PENALTY_MISS_1P,  # Penalty shot miss
-        200446: ShotSubtype.PENALTY_MADE_1P,  # Penalty shot made (assumed)
+        200442: ShotSubtype.MADE_3P,
+        200443: ShotSubtype.MADE_2P,
+        200444: ShotSubtype.MADE_1P,
+        200445: ShotSubtype.MISSED_1P,
+        200580: ShotSubtype.MISSED_3P,
+        200581: ShotSubtype.MISSED_2P,
     }
 
     # Foul type codes
@@ -383,8 +382,11 @@ class GeniusBasketballNormalizer:
         return message
 
     def _extract_period(self, raw: dict) -> Optional[int]:
-        period_id = self._to_int(raw.get("PartialResultTypeId"))
-        return self.PERIOD_ID_MAP.get(period_id) if period_id is not None else None
+        for key in ("PartialResultTypeId", "Period"):
+            period_id = self._to_int(raw.get(key))
+            if period_id in self.PERIOD_ID_MAP:
+                return self.PERIOD_ID_MAP[period_id]
+        return None
 
     def _extract_clock(self, raw: dict) -> Optional[str]:
         for key in ("Clock", "GameClock", "ClockTime", "Time", "PeriodTime"):
@@ -483,7 +485,7 @@ class GeniusBasketballNormalizer:
             if value is None:
                 return None
             return int(value)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return None
 
     def _points_from_shot_subtype(self, subtype: ShotSubtype) -> Optional[int]:

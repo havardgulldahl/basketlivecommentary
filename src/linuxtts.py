@@ -99,6 +99,7 @@ class LinuxTTS(BaseTTS):
         possible_paths = [
             Path.home() / ".local" / "share" / "piper-tts" / "voices",
             Path("/usr/share/piper-tts/voices"),
+            Path.cwd(),
             Path("./voices"),
         ]
 
@@ -166,7 +167,7 @@ class LinuxTTS(BaseTTS):
                     stderr=subprocess.DEVNULL,
                 )
                 return
-            except (subprocess.CalledProcessError, FileNotFoundError):
+            except subprocess.CalledProcessError, FileNotFoundError:
                 continue
 
         print("[tts] No audio player found (tried aplay, paplay, ffplay)")

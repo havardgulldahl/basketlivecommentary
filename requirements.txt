@@ -1,0 +1,6 @@
+# LLM interface + Ollama plugin
+llm>=0.24
+llm-ollama>=0.6
+
+# Existing runtime deps (keep your current versions if already pinned)
+pubnub>=7.0.0,<10

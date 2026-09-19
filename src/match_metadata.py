@@ -24,7 +24,12 @@ class Player:
     @property
     def full_name(self) -> str:
         """Get player's full name."""
-        return f"{self.first_name} {self.last_name}".strip()
+        first_name = (
+            self.first_name.strip().split(maxsplit=1)[0]
+            if self.first_name.strip()
+            else ""
+        )
+        return f"{first_name} {self.last_name}".strip()
 
     @property
     def display_name(self) -> str:
@@ -137,9 +142,9 @@ class MatchMetadata:
     def get_team_name(self, team_code: str) -> str:
         """Get team name from code (H/A)."""
         if team_code == "H":
-            return self.home_team_name.strip()
+            return self.home_team_name.strip().split(maxsplit=1)[0]
         elif team_code == "A":
-            return self.away_team_name.strip()
+            return self.away_team_name.strip().split(maxsplit=1)[0]
         return f"Team {team_code}"
 
     def is_home_team(self, team_id: int) -> bool:
