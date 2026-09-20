@@ -10,6 +10,9 @@ class Language(str, Enum):
 class RawEventType(str, Enum):
     SHOT = "Shot"
     FOUL = "Foul"
+    STEAL = "Steal"
+    BLOCK = "Block"
+    SUBSTITUTION = "Substitution"
     DEFENSIVE_REBOUND = "DefensiveRebound"
     OFFENSIVE_REBOUND = "OffensiveRebound"
     TURNOVER = "Turnover"
@@ -27,6 +30,9 @@ class EventKind(str, Enum):
     FOUL = "foul"
     TIMEOUT = "timeout"
     TURNOVER = "turnover"
+    STEAL = "steal"
+    BLOCK = "block"
+    SUBSTITUTION = "substitution"
     PERIOD = "period"
     MATCH = "match"
     LINEUP = "lineup"
@@ -46,6 +52,7 @@ class PeriodSubtype(str, Enum):
 
 
 class MatchSubtype(str, Enum):
+    START = "start"
     END = "end"
 
 

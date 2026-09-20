@@ -50,6 +50,9 @@ class CommentaryGenerator(ABC):
             EventKind.FOUL: self.comment_foul,
             EventKind.TIMEOUT: self.comment_timeout,
             EventKind.TURNOVER: self.comment_turnover,
+            EventKind.STEAL: self.comment_steal,
+            EventKind.BLOCK: self.comment_block,
+            EventKind.SUBSTITUTION: self.comment_substitution,
             EventKind.PERIOD: self.comment_period,
             EventKind.MATCH: self.comment_match,
             EventKind.LINEUP: self.comment_lineup,
@@ -179,6 +182,18 @@ class CommentaryGenerator(ABC):
         pass
 
     @abstractmethod
+    def comment_steal(self, evt: NormalizedEvent) -> Optional[str]:
+        pass
+
+    @abstractmethod
+    def comment_block(self, evt: NormalizedEvent) -> Optional[str]:
+        pass
+
+    @abstractmethod
+    def comment_substitution(self, evt: NormalizedEvent) -> Optional[str]:
+        pass
+
+    @abstractmethod
     def comment_period(self, evt: NormalizedEvent) -> Optional[str]:
         pass
 
@@ -252,7 +267,10 @@ class NorwegianCommentary(CommentaryGenerator):
             ShotSubtype.PENALTY_MISS_1P: f"{self.player_name(evt.player)} bommet på straffe for {self.team_name(evt.team)}.",
             ShotSubtype.BLOCKED: f"Blokkert skudd av {self.player_name(evt.player)} for {self.team_name(evt.team)}.",
         }
-        return mapping.get(subtype)
+        commentary = mapping.get(subtype)
+        if commentary and evt.assist:
+            commentary += f" Assist av {self.player_name(evt.assist)}."
+        return commentary
 
     def comment_rebound(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, ReboundSubtype)
@@ -287,6 +305,25 @@ class NorwegianCommentary(CommentaryGenerator):
             f"Balltap av {self.player_name(evt.player)} for {self.team_name(evt.team)}."
         )
 
+    def comment_steal(self, evt: NormalizedEvent) -> Optional[str]:
+        return (
+            f"{self.player_name(evt.player)} stjeler ballen for "
+            f"{self.team_name(evt.team)}."
+        )
+
+    def comment_block(self, evt: NormalizedEvent) -> Optional[str]:
+        return (
+            f"Blokk av {self.player_name(evt.player)} for "
+            f"{self.team_name(evt.team)}."
+        )
+
+    def comment_substitution(self, evt: NormalizedEvent) -> Optional[str]:
+        return (
+            f"Bytte for {self.team_name(evt.team)}: "
+            f"{self.player_name(evt.player_in)} inn, "
+            f"{self.player_name(evt.player_out)} ut."
+        )
+
     def comment_period(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, PeriodSubtype)
         if subtype == PeriodSubtype.PERIOD_START:
@@ -297,6 +334,8 @@ class NorwegianCommentary(CommentaryGenerator):
 
     def comment_match(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, MatchSubtype)
+        if subtype == MatchSubtype.START:
+            return "Kampen er i gang."
         if subtype == MatchSubtype.END:
             return None
         return None

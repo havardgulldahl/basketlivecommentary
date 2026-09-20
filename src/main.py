@@ -13,6 +13,8 @@ from pubnub.enums import PNStatusCategory, PNReconnectionPolicy
 from pubnub.pnconfiguration import PNConfiguration
 from pubnub.pubnub import PubNub
 
+from commentary import get_commentary
+from game_summary import GameSummary
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
 from game_clock import GameClock
 from match_metadata import MatchMetadata
@@ -32,23 +34,43 @@ SUBSCRIBE_KEY = "sub-c-fa031a92-9639-11e8-8ef1-fea37cdf89b9"
 
 
 class RecentEventDeduper:
-    def __init__(self, maxlen: int = 500):
-        self.items = deque(maxlen=maxlen)
-        self.set_items = set()
+    def __init__(self, maxlen: int = 500) -> None:
+        self.items: deque[str] = deque(maxlen=maxlen)
+        self.set_items: set[str] = set()
+        self.score_versions: dict[str, tuple[Any, Optional[int]]] = {}
 
     def is_new(self, evt: NormalizedEvent) -> bool:
         """Check if event is new (not a duplicate)."""
         fingerprint = evt.fingerprint
         if fingerprint in self.set_items:
-            return False
+            score_version = self._score_version(evt)
+            if (
+                score_version is None
+                or self.score_versions.get(fingerprint) == score_version
+            ):
+                return False
+            self.score_versions[fingerprint] = score_version
+            return True
 
         if len(self.items) == self.items.maxlen:
             old = self.items.popleft()
             self.set_items.discard(old)
+            self.score_versions.pop(old, None)
 
         self.items.append(fingerprint)
         self.set_items.add(fingerprint)
+        score_version = self._score_version(evt)
+        if score_version is not None:
+            self.score_versions[fingerprint] = score_version
         return True
+
+    @staticmethod
+    def _score_version(
+        event: NormalizedEvent,
+    ) -> Optional[tuple[Any, Optional[int]]]:
+        if event.kind != "shot":
+            return None
+        return event.team, event.points
 
 
 class ScoreTracker:
@@ -57,7 +79,7 @@ class ScoreTracker:
         announce_every: int = 4,
         stoppage_announce_every: int = 3,
         cooldown_seconds: float = 20.0,
-    ):
+    ) -> None:
         self.home_score = 0
         self.away_score = 0
         self.scoring_events = 0
@@ -67,25 +89,48 @@ class ScoreTracker:
         self.cooldown_seconds = cooldown_seconds
         self.last_score_spoken_at: Optional[float] = None
         self.score_announcements: list[dict[str, object]] = []
+        self.scoring_actions: dict[str, tuple[Any, int]] = {}
 
-    def update(self, event: NormalizedEvent, announce: bool = True):
+    def update(self, event: NormalizedEvent, announce: bool = True) -> None:
         event.score_announcement = False
         event.score_time_announcement = False
         event.home_score = self.home_score
         event.away_score = self.away_score
 
-        if event.kind == "shot" and event.points is not None:
-            if event.team == "H":
-                self.home_score += event.points
-            elif event.team == "A":
-                self.away_score += event.points
-            else:
-                return
+        if event.kind == "shot":
+            previous_team, previous_points = self.scoring_actions.get(
+                event.fingerprint, (None, 0)
+            )
+            current_points = event.points or 0
 
-            self.scoring_events += 1
+            if previous_team == "H":
+                self.home_score -= previous_points
+            elif previous_team == "A":
+                self.away_score -= previous_points
+
+            if event.team == "H":
+                self.home_score += current_points
+            elif event.team == "A":
+                self.away_score += current_points
+
+            was_scoring = previous_team in {"H", "A"} and previous_points > 0
+            is_scoring = event.team in {"H", "A"} and current_points > 0
+            self.scoring_events += int(is_scoring) - int(was_scoring)
+            self.scoring_actions[event.fingerprint] = (
+                event.team,
+                current_points,
+            )
             event.home_score = self.home_score
             event.away_score = self.away_score
-            if self.scoring_events % self.announce_every == 0:
+            score_changed = (previous_team, previous_points) != (
+                event.team,
+                current_points,
+            )
+            if (
+                score_changed
+                and is_scoring
+                and self.scoring_events % self.announce_every == 0
+            ):
                 event.score_announcement = self._schedule_announcement(event, announce)
         elif event.kind == "timer" and event.subtype == "stop":
             self.stoppage_events += 1
@@ -142,12 +187,19 @@ class MatchFeedListener(SubscribeCallback):
         self.metadata: Optional[MatchMetadata] = None
         self.commentary_engine = commentary_engine
         self.score_tracker = ScoreTracker()
+        self.game_summary = GameSummary()
+        self.summary_written = False
         self.match_introduction_announced = False
+        self.startup_status_announced = False
+        self.match_started = False
+        self.match_ended = False
+        self.last_event: Optional[NormalizedEvent] = None
         self.lineups: dict[str, dict[int, str]] = {}
         self.match_finished_at: Optional[float] = None
         self.match_finish_grace_period = 60.0
         self.match_dir = Path("matchdata") / str(match_id)
         self.match_dir.mkdir(parents=True, exist_ok=True)
+        self.summary_path = self.match_dir / "summary.md"
 
         # Open log file with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -213,6 +265,77 @@ class MatchFeedListener(SubscribeCallback):
         spoken = f"Vi følger med kampen mellom {home_name} og {away_name} på {venue}."
         if self.tts:
             print(f"[audio] Speaking: {spoken}")
+            self.tts.speak(spoken)
+
+    def _announce_startup_status(self) -> None:
+        if self.startup_status_announced:
+            return
+
+        self.startup_status_announced = True
+        if self.metadata:
+            home_name = self.metadata.get_team_name("H")
+            away_name = self.metadata.get_team_name("A")
+        elif self.language == "en":
+            home_name, away_name = "the home team", "the away team"
+        else:
+            home_name, away_name = "hjemmelaget", "bortelaget"
+
+        if not self.match_started:
+            if self.language == "en":
+                spoken = (
+                    f"The game between {home_name} and {away_name} "
+                    "has not started yet."
+                )
+            else:
+                spoken = (
+                    f"Kampen mellom {home_name} og {away_name} "
+                    "har ikke startet ennå."
+                )
+        elif self.match_ended:
+            if self.language == "en":
+                spoken = (
+                    f"The game is over. The final score between {home_name} "
+                    f"and {away_name} is {self.score_tracker.home_score}-"
+                    f"{self.score_tracker.away_score}."
+                )
+            else:
+                spoken = (
+                    f"Kampen er slutt. Sluttstillingen mellom {home_name} "
+                    f"og {away_name} er {self.score_tracker.home_score}-"
+                    f"{self.score_tracker.away_score}."
+                )
+        else:
+            last_commentary = (
+                get_commentary(
+                    self.last_event,
+                    metadata=self.metadata,
+                    language=self.language,
+                )
+                if self.last_event
+                else None
+            )
+            if self.language == "en":
+                spoken = (
+                    f"The game is underway. The score between {home_name} "
+                    f"and {away_name} is {self.score_tracker.home_score}-"
+                    f"{self.score_tracker.away_score}."
+                )
+                last_prefix = " Last event: "
+                unavailable = " Last event is unavailable."
+            else:
+                spoken = (
+                    f"Kampen er i gang. Stillingen mellom {home_name} "
+                    f"og {away_name} er {self.score_tracker.home_score}-"
+                    f"{self.score_tracker.away_score}."
+                )
+                last_prefix = " Siste hendelse: "
+                unavailable = " Siste hendelse er ikke tilgjengelig."
+            spoken += (
+                f"{last_prefix}{last_commentary}" if last_commentary else unavailable
+            )
+
+        print(f"[startup] {spoken}")
+        if self.tts:
             self.tts.speak(spoken)
 
     def status(self, pubnub, status):
@@ -321,6 +444,7 @@ class MatchFeedListener(SubscribeCallback):
         except Exception as error:
             self._log_error("History loading failed", error)
             print(f"[history] Could not load prior events: {error}")
+        self._announce_startup_status()
 
     def _process_raw_message(self, raw_msg: dict, announce: bool):
         self.log_fp.write(json.dumps(raw_msg, ensure_ascii=False) + "\n")
@@ -336,7 +460,10 @@ class MatchFeedListener(SubscribeCallback):
                 print("[normalize] skipped: could not parse payload")
             return
 
+        self.game_summary.update(evt)
         if not self.deduper.is_new(evt):
+            if self.match_ended:
+                self._write_game_summary()
             if announce:
                 print(f"[dedupe] skipped duplicate: {evt.fingerprint}")
             return
@@ -347,6 +474,21 @@ class MatchFeedListener(SubscribeCallback):
                 return
 
         self.score_tracker.update(evt, announce=announce)
+
+        if evt.kind == "match":
+            if evt.subtype == "start":
+                self.match_started = True
+                self.match_ended = False
+            elif evt.subtype == "end":
+                self.match_started = True
+                self.match_ended = True
+
+        if not (
+            evt.kind in {"match_data", "lineup", "unknown"}
+            or evt.kind == "timer"
+            and evt.subtype == "update"
+        ):
+            self.last_event = evt
 
         if evt.final_summary and self.match_finished_at is None:
             self.match_finished_at = time.monotonic() + self.match_finish_grace_period
@@ -364,6 +506,9 @@ class MatchFeedListener(SubscribeCallback):
         elif evt.kind == "timer" and evt.clock:
             self.game_clock.update_clock(evt.clock)
 
+        if self.match_ended:
+            self._write_game_summary()
+
         if not announce:
             return
 
@@ -377,6 +522,14 @@ class MatchFeedListener(SubscribeCallback):
 
         if self.commentary_engine:
             self.commentary_engine.push(evt)
+
+    def _write_game_summary(self) -> None:
+        if self.metadata is None:
+            return
+        self.game_summary.write(self.summary_path, self.metadata)
+        if not self.summary_written:
+            print(f"[summary] Wrote game summary to: {self.summary_path}")
+            self.summary_written = True
 
     def _update_lineup(self, event: NormalizedEvent) -> bool:
         team = str(event.team or "")
@@ -415,6 +568,8 @@ class MatchFeedListener(SubscribeCallback):
         """Handle MatchData event containing rosters and match info."""
         try:
             self._cache_match_metadata(raw_msg)
+            if self.match_ended:
+                self._write_game_summary()
             self._announce_match_introduction()
             if not announce:
                 return

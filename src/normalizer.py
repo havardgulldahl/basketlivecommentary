@@ -34,6 +34,9 @@ class NormalizedEvent:
     score_time_announcement: bool = False
     lineup_changes: Optional[dict[str, list[str]]] = None
     final_summary: bool = False
+    assist: Optional[Any] = None
+    player_in: Optional[Any] = None
+    player_out: Optional[Any] = None
 
 
 class GeniusBasketballNormalizer:
@@ -65,6 +68,7 @@ class GeniusBasketballNormalizer:
         1: (EventKind.TIMER, TimerSubtype.START),  # Start
         2: (EventKind.TIMER, TimerSubtype.STOP),  # Stop
         3: (EventKind.TIMER, TimerSubtype.UPDATE),  # Update
+        4: (EventKind.MATCH, MatchSubtype.START),  # Match start
         5: (EventKind.MATCH, MatchSubtype.END),  # Match end
         6: (EventKind.PERIOD, PeriodSubtype.PERIOD_START),  # Period start
         7: (EventKind.PERIOD, PeriodSubtype.END),  # Period end
@@ -76,8 +80,8 @@ class GeniusBasketballNormalizer:
         200074: 2,
         200075: 3,
         200076: 4,
-        # 200077: 5,  # OT1
-        # 200078: 6,  # OT2
+        200077: 5,
+        200078: 6,
     }
 
     def normalize(self, envelope_message: Any) -> Optional[NormalizedEvent]:
@@ -153,6 +157,41 @@ class GeniusBasketballNormalizer:
                 description=(
                     f"Turnover by player {player}" if player is not None else "Turnover"
                 ),
+            )
+
+        if raw_type in {RawEventType.STEAL, RawEventType.BLOCK}:
+            kind = (
+                EventKind.STEAL if raw_type == RawEventType.STEAL else EventKind.BLOCK
+            )
+            return self._build_event(
+                raw=raw,
+                match_id=match_id,
+                raw_type=raw_type,
+                kind=kind,
+                subtype=None,
+                team=team,
+                player=player,
+                points=None,
+                period=period,
+                clock=clock,
+                description=f"{kind.value.capitalize()} by player {player}",
+            )
+
+        if raw_type == RawEventType.SUBSTITUTION:
+            return self._build_event(
+                raw=raw,
+                match_id=match_id,
+                raw_type=raw_type,
+                kind=EventKind.SUBSTITUTION,
+                subtype=None,
+                team=team,
+                player=None,
+                points=None,
+                period=period,
+                clock=clock,
+                description="Player substitution",
+                player_in=raw.get("PlayerIn"),
+                player_out=raw.get("PlayerOut"),
             )
 
         if raw_type == RawEventType.TIMER:
@@ -328,6 +367,7 @@ class GeniusBasketballNormalizer:
             period=period,
             clock=clock,
             description=desc,
+            assist=raw.get("Assist"),
         )
 
     def _normalize_timer(
@@ -367,8 +407,10 @@ class GeniusBasketballNormalizer:
             description = (
                 f"End of period {period}" if period is not None else "Period end"
             )
-        elif kind == EventKind.MATCH and subtype == MatchSubtype.END:
-            description = "Match end"
+        elif kind == EventKind.MATCH:
+            description = (
+                "Match start" if subtype == MatchSubtype.START else "Match end"
+            )
         elif kind == EventKind.TIMER and subtype == TimerSubtype.START:
             description = "Clock start"
         elif kind == EventKind.TIMER and subtype == TimerSubtype.STOP:
@@ -435,6 +477,9 @@ class GeniusBasketballNormalizer:
         period: Optional[int],
         clock: Optional[str],
         description: str,
+        assist: Any = None,
+        player_in: Any = None,
+        player_out: Any = None,
     ) -> NormalizedEvent:
         raw_type_value = raw_type.value if hasattr(raw_type, "value") else raw_type
         kind_value = kind.value if hasattr(kind, "value") else str(kind)
@@ -466,6 +511,9 @@ class GeniusBasketballNormalizer:
             description=description,
             fingerprint=fingerprint,
             raw=raw,
+            assist=assist,
+            player_in=player_in,
+            player_out=player_out,
         )
 
     def _fingerprint(
