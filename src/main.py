@@ -14,6 +14,7 @@ from pubnub.pnconfiguration import PNConfiguration
 from pubnub.pubnub import PubNub
 
 from commentary import get_commentary
+from game_catalog import load_recorded_games, print_game_overview
 from game_summary import GameSummary
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
 from game_clock import GameClock
@@ -770,13 +771,29 @@ def main(
         print("Shutdown complete.")
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Parse command-line arguments and run the selected mode."""
     from argparse import ArgumentParser
 
     ap = ArgumentParser(
         description="Basketball match event listener and TTS commentator"
     )
-    ap.add_argument("match_id", type=int, help="Match ID to subscribe to")
+    ap.add_argument(
+        "match_id",
+        type=int,
+        nargs="?",
+        help="Match ID to subscribe to",
+    )
+    ap.add_argument(
+        "--list-games",
+        action="store_true",
+        help="List games with cached metadata and their completion status",
+    )
+    ap.add_argument(
+        "--generate-missing-summaries",
+        action="store_true",
+        help="Generate missing summaries for completed recorded games",
+    )
     ap.add_argument("--silent", action="store_true", help="Disable TTS output")
     ap.add_argument(
         "--language",
@@ -804,6 +821,19 @@ if __name__ == "__main__":
     )
 
     args = ap.parse_args()
+    if args.list_games or args.generate_missing_summaries:
+        recorded_games = load_recorded_games(Path("matchdata"))
+        print_game_overview(
+            recorded_games,
+            generate_missing=args.generate_missing_summaries,
+        )
+        raise SystemExit(0)
+    if args.match_id is None:
+        ap.error(
+            "match_id is required unless --list-games or "
+            "--generate-missing-summaries is used"
+        )
+
     main(
         match_id=args.match_id,
         silent=args.silent,
@@ -812,3 +842,7 @@ if __name__ == "__main__":
         llm_model=args.llm_model,
         llm_window_ms=args.llm_window_ms,
     )
+
+
+if __name__ == "__main__":
+    cli()

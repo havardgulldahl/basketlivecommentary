@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-basketsnakker = "basketsnakker:main"
+basketsnakker = "main:cli"
 
 [build-system]
 requires = ["uv_build>=0.12.14,<0.13.0"]
