@@ -201,7 +201,14 @@ class BufferedCommentaryEngine:
                 spoken = " ".join(lines)
 
         score_event = next(
-            (event for event in reversed(batch) if event.score_announcement), None
+            (
+                event
+                for event in reversed(batch)
+                if event.score_announcement
+                or event.score_time_announcement
+                or event.final_summary
+            ),
+            None,
         )
         if score_event:
             score_line = get_score_commentary(

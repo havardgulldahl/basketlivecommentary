@@ -31,6 +31,9 @@ class NormalizedEvent:
     home_score: Optional[int] = None
     away_score: Optional[int] = None
     score_announcement: bool = False
+    score_time_announcement: bool = False
+    lineup_changes: Optional[dict[str, list[str]]] = None
+    final_summary: bool = False
 
 
 class GeniusBasketballNormalizer:
@@ -185,6 +188,21 @@ class GeniusBasketballNormalizer:
                 period=period,
                 clock=clock,
                 description="Match data update",
+            )
+
+        if raw_type == RawEventType.TEAM_UPDATE:
+            return self._build_event(
+                raw=raw,
+                match_id=match_id,
+                raw_type=raw_type,
+                kind=EventKind.LINEUP,
+                subtype="update",
+                team=team,
+                player=None,
+                points=None,
+                period=period,
+                clock=clock,
+                description=f"Lineup update for team {team}",
             )
 
         return self._build_event(
@@ -389,7 +407,16 @@ class GeniusBasketballNormalizer:
         return None
 
     def _extract_clock(self, raw: dict) -> Optional[str]:
-        for key in ("Clock", "GameClock", "ClockTime", "Time", "PeriodTime"):
+        # TotalMatchTime is the countdown remaining in the period; PeriodTime
+        # and Time both count UP (elapsed), so they are only used as a fallback.
+        for key in (
+            "Clock",
+            "GameClock",
+            "ClockTime",
+            "TotalMatchTime",
+            "PeriodTime",
+            "Time",
+        ):
             value = raw.get(key)
             if value is not None:
                 return str(value)
@@ -454,9 +481,18 @@ class GeniusBasketballNormalizer:
         period: Optional[int],
         clock: Optional[str],
     ) -> str:
+        # ClientId is the stable identity the feed uses for an action; corrections
+        # (e.g. attributing a basket to a different player) resend the same
+        # ClientId/Id with a new ServerTimeStamp, so the timestamp must not be
+        # part of the key or corrections get double-counted as new events.
+        client_id = raw.get("ClientId")
+        if client_id is not None:
+            return f"client:{client_id}"
+
         event_id = raw.get("EventId") or raw.get("Id") or raw.get("MessageId")
         if event_id is not None:
-            return f"id:{event_id}"
+            event_type = raw.get("MatchEventType") or raw_type
+            return f"id:{event_id}|type:{event_type}"
 
         timestamp = (
             raw.get("Timestamp")

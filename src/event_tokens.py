@@ -16,6 +16,7 @@ class RawEventType(str, Enum):
     TIMER = "Timer"
     TIMEOUT = "Timeout"
     MATCH_DATA = "MatchData"
+    TEAM_UPDATE = "TeamUpdate"
 
 
 class EventKind(str, Enum):
@@ -28,6 +29,7 @@ class EventKind(str, Enum):
     TURNOVER = "turnover"
     PERIOD = "period"
     MATCH = "match"
+    LINEUP = "lineup"
     UNKNOWN = "unknown"
 
 

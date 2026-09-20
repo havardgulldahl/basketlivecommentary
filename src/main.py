@@ -5,7 +5,7 @@ import platform
 import traceback
 from collections import deque
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 from datetime import datetime
 
 from pubnub.callbacks import SubscribeCallback
@@ -52,26 +52,69 @@ class RecentEventDeduper:
 
 
 class ScoreTracker:
-    def __init__(self, announce_every: int = 4):
+    def __init__(
+        self,
+        announce_every: int = 4,
+        stoppage_announce_every: int = 3,
+        cooldown_seconds: float = 20.0,
+    ):
         self.home_score = 0
         self.away_score = 0
         self.scoring_events = 0
+        self.stoppage_events = 0
         self.announce_every = announce_every
+        self.stoppage_announce_every = stoppage_announce_every
+        self.cooldown_seconds = cooldown_seconds
+        self.last_score_spoken_at: Optional[float] = None
+        self.score_announcements: list[dict[str, object]] = []
 
-    def update(self, event: NormalizedEvent):
-        if event.kind != "shot" or event.points is None:
-            return
-        if event.team == "H":
-            self.home_score += event.points
-        elif event.team == "A":
-            self.away_score += event.points
-        else:
-            return
-
-        self.scoring_events += 1
+    def update(self, event: NormalizedEvent, announce: bool = True):
+        event.score_announcement = False
+        event.score_time_announcement = False
         event.home_score = self.home_score
         event.away_score = self.away_score
-        event.score_announcement = self.scoring_events % self.announce_every == 0
+
+        if event.kind == "shot" and event.points is not None:
+            if event.team == "H":
+                self.home_score += event.points
+            elif event.team == "A":
+                self.away_score += event.points
+            else:
+                return
+
+            self.scoring_events += 1
+            event.home_score = self.home_score
+            event.away_score = self.away_score
+            if self.scoring_events % self.announce_every == 0:
+                event.score_announcement = self._schedule_announcement(event, announce)
+        elif event.kind == "timer" and event.subtype == "stop":
+            self.stoppage_events += 1
+            event.score_time_announcement = self._schedule_announcement(event, announce)
+        elif event.kind == "match" and event.subtype == "end":
+            event.final_summary = True
+
+    def _schedule_announcement(self, event: NormalizedEvent, announce: bool) -> bool:
+        if not announce:
+            return False
+        now = time.monotonic()
+        if (
+            self.last_score_spoken_at is not None
+            and now - self.last_score_spoken_at < self.cooldown_seconds
+        ):
+            return False
+        self.last_score_spoken_at = now
+        self.score_announcements.append(
+            {
+                "timestamp": time.time(),
+                "event_id": cast(dict[str, Any], event.raw).get("Id"),
+                "home_score": self.home_score,
+                "away_score": self.away_score,
+                "period": event.period,
+                "clock": event.clock,
+                "reason": "stoppage" if event.kind == "timer" else "score",
+            }
+        )
+        return True
 
 
 # =========================
@@ -100,6 +143,9 @@ class MatchFeedListener(SubscribeCallback):
         self.commentary_engine = commentary_engine
         self.score_tracker = ScoreTracker()
         self.match_introduction_announced = False
+        self.lineups: dict[str, dict[int, str]] = {}
+        self.match_finished_at: Optional[float] = None
+        self.match_finish_grace_period = 60.0
         self.match_dir = Path("matchdata") / str(match_id)
         self.match_dir.mkdir(parents=True, exist_ok=True)
 
@@ -295,7 +341,20 @@ class MatchFeedListener(SubscribeCallback):
                 print(f"[dedupe] skipped duplicate: {evt.fingerprint}")
             return
 
-        self.score_tracker.update(evt)
+        if evt.kind == "lineup":
+            lineup_changed = self._update_lineup(evt)
+            if not lineup_changed:
+                return
+
+        self.score_tracker.update(evt, announce=announce)
+
+        if evt.final_summary and self.match_finished_at is None:
+            self.match_finished_at = time.monotonic() + self.match_finish_grace_period
+            if announce:
+                print(
+                    f"[match] Finished; shutting down in "
+                    f"{int(self.match_finish_grace_period)} seconds"
+                )
 
         if evt.kind == "period":
             if evt.subtype == "start":
@@ -318,6 +377,39 @@ class MatchFeedListener(SubscribeCallback):
 
         if self.commentary_engine:
             self.commentary_engine.push(evt)
+
+    def _update_lineup(self, event: NormalizedEvent) -> bool:
+        team = str(event.team or "")
+        players = event.raw.get("Players", [])
+        current = {
+            int(player["Id"]): self._short_player_name(player)
+            for player in players
+            if player.get("Id") is not None
+            and player.get("IsCoach") is not True
+            and player.get("IsStarter") is True
+        }
+        previous = self.lineups.get(team)
+        self.lineups[team] = current
+        if previous is None:
+            return False
+
+        added = [current[player_id] for player_id in current.keys() - previous.keys()]
+        removed = [
+            previous[player_id] for player_id in previous.keys() - current.keys()
+        ]
+        if not added and not removed:
+            return False
+
+        event.lineup_changes = {"added": sorted(added), "removed": sorted(removed)}
+        return True
+
+    @staticmethod
+    def _short_player_name(player: dict) -> str:
+        first_name = str(player.get("FirstName") or "").strip().split(maxsplit=1)
+        last_name = str(player.get("LastName") or "").strip()
+        return " ".join(
+            part for part in (first_name[0] if first_name else "", last_name) if part
+        )
 
     def _handle_match_data(self, raw_msg: dict, announce: bool = True):
         """Handle MatchData event containing rosters and match info."""
@@ -344,6 +436,12 @@ class MatchFeedListener(SubscribeCallback):
             "seconds_since_last_event": int(time_since_last_event),
             "stale": time_since_last_event > 60,
         }
+
+    def should_shutdown_after_match(self) -> bool:
+        return (
+            self.match_finished_at is not None
+            and time.monotonic() >= self.match_finished_at
+        )
 
 
 # =========================
@@ -501,6 +599,9 @@ def main(
 
     try:
         while True:
+            if listener.should_shutdown_after_match():
+                print("\n[match] Grace period complete; shutting down...")
+                break
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n\nShutting down...")

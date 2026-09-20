@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional, cast
 
 from event_tokens import (
     EventKind,
@@ -52,6 +52,7 @@ class CommentaryGenerator(ABC):
             EventKind.TURNOVER: self.comment_turnover,
             EventKind.PERIOD: self.comment_period,
             EventKind.MATCH: self.comment_match,
+            EventKind.LINEUP: self.comment_lineup,
         }
 
         handler = dispatch.get(kind)
@@ -62,11 +63,34 @@ class CommentaryGenerator(ABC):
         return spoken
 
     def score_commentary(self, evt: NormalizedEvent) -> Optional[str]:
-        if evt.home_score is None or evt.away_score is None:
+        if (
+            evt.home_score is None
+            or evt.away_score is None
+            or not evt.score_announcement
+            and not evt.score_time_announcement
+            and not evt.final_summary
+        ):
             return None
 
         home_name = self.team_name("H")
         away_name = self.team_name("A")
+        if evt.final_summary:
+            return self.final_score_line(
+                home_name, away_name, evt.home_score, evt.away_score
+            )
+        if evt.score_time_announcement:
+            raw = cast(dict[str, Any], evt.raw)
+            period_name = raw.get("PeriodName") or f"periode {evt.period}"
+            # TotalMatchTime is the countdown remaining; PeriodTime counts up (elapsed).
+            remaining = raw.get("TotalMatchTime") or evt.clock or "ukjent tid"
+            return self.score_time_line(
+                home_name,
+                away_name,
+                evt.home_score,
+                evt.away_score,
+                period_name,
+                str(remaining),
+            )
         if evt.home_score == evt.away_score:
             return self.score_tie_line(home_name, away_name, evt.home_score)
 
@@ -85,6 +109,24 @@ class CommentaryGenerator(ABC):
     @abstractmethod
     def score_lead_line(
         self, leader_name: str, leader_score: int, trailing_score: int
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def score_time_line(
+        self,
+        home_name: str,
+        away_name: str,
+        home_score: int,
+        away_score: int,
+        period_name: str,
+        remaining: str,
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def final_score_line(
+        self, home_name: str, away_name: str, home_score: int, away_score: int
     ) -> str:
         pass
 
@@ -144,6 +186,10 @@ class CommentaryGenerator(ABC):
     def comment_match(self, evt: NormalizedEvent) -> Optional[str]:
         pass
 
+    @abstractmethod
+    def comment_lineup(self, evt: NormalizedEvent) -> Optional[str]:
+        pass
+
 
 class NorwegianCommentary(CommentaryGenerator):
     def language_label(self) -> str:
@@ -162,6 +208,28 @@ class NorwegianCommentary(CommentaryGenerator):
         self, leader_name: str, leader_score: int, trailing_score: int
     ) -> str:
         return f"Stillingen er {leader_score}-{trailing_score}, og {leader_name} leder."
+
+    def score_time_line(
+        self,
+        home_name: str,
+        away_name: str,
+        home_score: int,
+        away_score: int,
+        period_name: str,
+        remaining: str,
+    ) -> str:
+        return (
+            f"Stillingen er {home_score}-{away_score}. Det er {remaining} igjen "
+            f"av {period_name.lower()}, mellom {home_name} og {away_name}."
+        )
+
+    def final_score_line(
+        self, home_name: str, away_name: str, home_score: int, away_score: int
+    ) -> str:
+        if home_score == away_score:
+            return f"Kampen er slutt. Det ble uavgjort {home_score}-{away_score} mellom {home_name} og {away_name}."
+        winner = home_name if home_score > away_score else away_name
+        return f"Kampen er slutt. {winner} vinner {home_score}-{away_score}."
 
     def comment_timer(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, TimerSubtype)
@@ -230,7 +298,20 @@ class NorwegianCommentary(CommentaryGenerator):
     def comment_match(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, MatchSubtype)
         if subtype == MatchSubtype.END:
-            return "Kampen er slutt!"
+            return None
+        return None
+
+    def comment_lineup(self, evt: NormalizedEvent) -> Optional[str]:
+        changes = evt.lineup_changes or {}
+        added = ", ".join(changes.get("added", []))
+        removed = ", ".join(changes.get("removed", []))
+        team = self.team_name(evt.team)
+        if added and removed:
+            return f"Bytte for {team}: {added} inn, {removed} ut."
+        if added:
+            return f"{added} kommer inn for {team}."
+        if removed:
+            return f"{removed} går ut for {team}."
         return None
 
 
@@ -253,6 +334,28 @@ class EnglishCommentary(CommentaryGenerator):
         self, leader_name: str, leader_score: int, trailing_score: int
     ) -> str:
         return f"The score is {leader_score}-{trailing_score}, with {leader_name} in front."
+
+    def score_time_line(
+        self,
+        home_name: str,
+        away_name: str,
+        home_score: int,
+        away_score: int,
+        period_name: str,
+        remaining: str,
+    ) -> str:
+        return (
+            f"The score is {home_score}-{away_score}, with {remaining} remaining "
+            f"in the {period_name.lower()}, between {home_name} and {away_name}."
+        )
+
+    def final_score_line(
+        self, home_name: str, away_name: str, home_score: int, away_score: int
+    ) -> str:
+        if home_score == away_score:
+            return f"The game is over. It finished tied {home_score}-{away_score} between {home_name} and {away_name}."
+        winner = home_name if home_score > away_score else away_name
+        return f"The game is over. {winner} win {home_score}-{away_score}."
 
     def comment_timer(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, TimerSubtype)
@@ -319,7 +422,20 @@ class EnglishCommentary(CommentaryGenerator):
     def comment_match(self, evt: NormalizedEvent) -> Optional[str]:
         subtype = to_enum(evt.subtype, MatchSubtype)
         if subtype == MatchSubtype.END:
-            return "That's the final buzzer! Game over!"
+            return None
+        return None
+
+    def comment_lineup(self, evt: NormalizedEvent) -> Optional[str]:
+        changes = evt.lineup_changes or {}
+        added = ", ".join(changes.get("added", []))
+        removed = ", ".join(changes.get("removed", []))
+        team = self.team_name(evt.team)
+        if added and removed:
+            return f"Change for {team}: {added} in, {removed} out."
+        if added:
+            return f"{added} comes in for {team}."
+        if removed:
+            return f"{removed} comes off for {team}."
         return None
 
 
@@ -353,4 +469,6 @@ def get_score_commentary(
         if lang == Language.EN
         else NorwegianCommentary(metadata)
     )
-    return generator.score_commentary(evt) if evt.score_announcement else None
+    if evt.score_announcement or evt.score_time_announcement or evt.final_summary:
+        return generator.score_commentary(evt)
+    return None
