@@ -1,6 +1,6 @@
-# LLM interface + Ollama plugin
+# Datasette llm interface + GPT4All plugin
 llm>=0.24
-llm-ollama>=0.6
+llm-gpt4all>=0.4
 
 # Existing runtime deps (keep your current versions if already pinned)
 pubnub>=7.0.0,<10

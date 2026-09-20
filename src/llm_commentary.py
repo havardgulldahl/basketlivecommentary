@@ -15,7 +15,7 @@ class LLMBatchCommentator:
     using https://llm.datasette.io/ Python API.
     """
 
-    def __init__(self, language: str = "no", model: str = "llama3.2:latest"):
+    def __init__(self, language: str = "no", model: str = "qwen2-1_5b-instruct-q4_0"):
         self.language = language
         self.model_id = model
         self.enabled = False
@@ -109,7 +109,7 @@ class BufferedCommentaryEngine:
         metadata_getter: Callable[[], Optional[MatchMetadata]],
         on_commentary: Callable[[str], None],
         use_llm: bool = False,
-        llm_model: str = "llama3.2:latest",
+        llm_model: str = "qwen2-1_5b-instruct-q4_0",
         flush_window_ms: int = 1200,
         max_batch_size: int = 4,
     ):

@@ -118,7 +118,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "llm" },
-    { name = "llm-ollama" },
+    { name = "llm-gpt4all" },
     { name = "piper-tts" },
     { name = "pubnub" },
 ]
@@ -126,7 +126,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "llm", specifier = ">=0.24" },
-    { name = "llm-ollama", specifier = ">=0.6" },
+    { name = "llm-gpt4all", specifier = ">=0.4" },
     { name = "piper-tts", specifier = ">=1.8" },
     { name = "pubnub", specifier = ">=7.0.0,<10" },
 ]
@@ -280,6 +280,15 @@ wheels = [
 ]
 
 [[package]]
+name = "colorama"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
 name = "condense-json"
 version = "1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -335,6 +344,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/89/76/c615883b7b521ead2944bb3480398cbb07e12b7b4e4d073d3752eb721558/frozenlist-1.8.0-cp314-cp314t-win_amd64.whl", hash = "sha256:06be8f67f39c8b1dc671f5d83aaefd3358ae5cdcf8314552c57e7ed3e6475bdd", size = 49451, upload-time = "2025-10-06T05:37:53.425Z" },
     { url = "https://files.pythonhosted.org/packages/e0/a3/5982da14e113d07b325230f95060e2169f5311b1017ea8af2a29b374c289/frozenlist-1.8.0-cp314-cp314t-win_arm64.whl", hash = "sha256:102e6314ca4da683dca92e3b1355490fed5f313b768500084fbe6371fddfdb79", size = 42507, upload-time = "2025-10-06T05:37:54.513Z" },
     { url = "https://files.pythonhosted.org/packages/9a/9a/e35b4a917281c0b8419d4207f4334c8e8c5dbf4f3f5f9ada73958d937dcc/frozenlist-1.8.0-py3-none-any.whl", hash = "sha256:0c18a16eab41e82c295618a77502e17b195883241c563b00f0aa5106fc4eaa0d", size = 13409, upload-time = "2025-10-06T05:38:16.721Z" },
+]
+
+[[package]]
+name = "gpt4all"
+version = "2.8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/92/bad46a9bc5b993727045d09ce35e2dcc3939be02f47acfc99b2be0d33b33/gpt4all-2.8.2-py3-none-macosx_10_15_universal2.whl", hash = "sha256:41d6de60fe1f9c9a29bcbb585c5eb39083893cf00db0b836de1f2d88e2fbbb17", size = 6622150, upload-time = "2024-08-14T18:21:13.648Z" },
+    { url = "https://files.pythonhosted.org/packages/93/60/ef1efd83c5757a69e8ed842b8a12b091e94a9bb2ceacc8b6e1c2e6487a77/gpt4all-2.8.2-py3-none-manylinux1_x86_64.whl", hash = "sha256:c61e977afa72475c076211fd9b59a88334fc0062615be8c2f7716363a21fbafa", size = 121614072, upload-time = "2024-08-14T18:21:21.736Z" },
+    { url = "https://files.pythonhosted.org/packages/04/92/dd9dd077f0fc61218e4116a7154958eff36f06893506ad3290802218b1c9/gpt4all-2.8.2-py3-none-win_amd64.whl", hash = "sha256:a164674943df732808266e5bf63332fadef95eac802c201b47c7b378e5bd9f45", size = 119593619, upload-time = "2024-08-14T18:21:31.375Z" },
 ]
 
 [[package]]
@@ -511,17 +534,17 @@ wheels = [
 ]
 
 [[package]]
-name = "llm-ollama"
-version = "0.17.1"
+name = "llm-gpt4all"
+version = "0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "gpt4all" },
+    { name = "httpx" },
     { name = "llm" },
-    { name = "ollama" },
-    { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/1c/94628d9a04d0d63fafa3f394559943e30f168c96aec548bb06fdecf63589/llm_ollama-0.17.1.tar.gz", hash = "sha256:3ffe96f3fd5c5887c862d60b1c84628e1f9654a274455a843559cd14157317cb", size = 31756, upload-time = "2026-09-04T12:31:23.165Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/a7/1e33cc26e6489678f130c5539e011788e1d20b2ceec3414d3ac6012355f0/llm_gpt4all-0.4.tar.gz", hash = "sha256:3e498ae6fa0d146d11cf1885e24cc218b77280102d5cfe666d6732c6fdc59927", size = 11069, upload-time = "2024-04-20T00:33:49.379Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/b1/bd3ac659af124394eb1a4360f8d55f15a8d99dac303ea2920c288f884928/llm_ollama-0.17.1-py3-none-any.whl", hash = "sha256:012e5634826ed058e36e9bfa905c8a09b4a75d6a283bfc6970209bef564322bd", size = 19361, upload-time = "2026-09-04T12:31:21.877Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/aa/9b130e426bec78591378c78227983c9dcc635af9847b1eca3eee01afb5f1/llm_gpt4all-0.4-py3-none-any.whl", hash = "sha256:4f7dd866025bd7b804aab81b85e9f5a5ac45171e6fd52b3c4fb75f30e762b384", size = 10914, upload-time = "2024-04-20T00:33:47.226Z" },
 ]
 
 [[package]]
@@ -668,19 +691,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a1/d2/4e1014173aa3c55e6a756e0e567290743a6ab33a288460374d7ef6bcd239/numpy-2.5.3-cp315-cp315t-win32.whl", hash = "sha256:f54660b0eb6b0b9f36e7fe1cdfdff472028dd0d14acd9b9b65098efbad059469", size = 6330292, upload-time = "2026-09-06T16:27:38.149Z" },
     { url = "https://files.pythonhosted.org/packages/6c/b0/ff5658a58199b7bcaad87bf260eef6713d9d42cca4e028f935b4fc5fbac6/numpy-2.5.3-cp315-cp315t-win_amd64.whl", hash = "sha256:1aad64d99730d013cfc6debafed22783b4fc5a7f4b8bc744d2d8cf7dcc880551", size = 12884918, upload-time = "2026-09-06T16:27:40.965Z" },
     { url = "https://files.pythonhosted.org/packages/fb/0b/b12a2df5d1b774bd9007a6fdff9381145b6223d37f11afc9c37ab0efd9a1/numpy-2.5.3-cp315-cp315t-win_arm64.whl", hash = "sha256:befa1ae5bd6030b3f512b43ff3fa5290bbed6b84411a44244b14adf835f5b89d", size = 10850807, upload-time = "2026-09-06T16:27:43.868Z" },
-]
-
-[[package]]
-name = "ollama"
-version = "0.6.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/72/5f12423b6b39ca8430fbe56f77fcf4ef60f63067c7c4a2e30e200ed9ec16/ollama-0.6.2.tar.gz", hash = "sha256:936d55daa684f474364c098611c933626f8d6c7d67065c5b7ae0c477b508b07f", size = 53145, upload-time = "2026-04-29T21:21:15.018Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/ab/d6722beeb2d10f7a3b9ff49375708904fde18f82b5609a0bc4aeb5996a4d/ollama-0.6.2-py3-none-any.whl", hash = "sha256:3ad7daab28e5a973445c36a73882a3ef698c2ebb00e21e308652741577509f7d", size = 15115, upload-time = "2026-04-29T21:21:13.794Z" },
 ]
 
 [[package]]
@@ -1093,6 +1103,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20d58e7ace7e5edfe65b849442b00ffcdd56be88697c6/tabulate-0.10.0.tar.gz", hash = "sha256:e2cfde8f79420f6deeffdeda9aaec3b6bc5abce947655d17ac662b126e48a60d", size = 91754, upload-time = "2026-03-04T18:55:34.402Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl", hash = "sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3", size = 39814, upload-time = "2026-03-04T18:55:31.284Z" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.70.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
 ]
 
 [[package]]

@@ -697,7 +697,7 @@ def main(
     silent: bool = False,
     language: str = "no",
     use_llm: bool = False,
-    llm_model: str = "llama3.2:latest",
+    llm_model: str = "qwen2-1_5b-instruct-q4_0",
     llm_window_ms: int = 1200,
 ):
     pubnub = build_pubnub()
@@ -810,8 +810,8 @@ def cli() -> None:
     ap.add_argument(
         "--llm-model",
         type=str,
-        default="llama3.2:latest",
-        help="Model ID for `llm` (default: llama3.2:latest)",
+        default="qwen2-1_5b-instruct-q4_0",
+        help="Model ID or alias for Datasette `llm` (default: qwen2-1_5b-instruct-q4_0)",
     )
     ap.add_argument(
         "--llm-window-ms",

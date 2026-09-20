@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "llm>=0.24",
-    "llm-ollama>=0.6",
+    "llm-gpt4all>=0.4",
     "piper-tts>=1.8",
     "pubnub>=7.0.0,<10",
 ]
