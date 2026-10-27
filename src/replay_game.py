@@ -11,6 +11,7 @@ from dataclasses import asdict
 
 from normalizer import GeniusBasketballNormalizer, NormalizedEvent
 from commentary import get_commentary
+from llm_commentary import BufferedCommentaryEngine
 from match_metadata import MatchMetadata
 from tts import BaseTTS
 import platform
@@ -25,6 +26,8 @@ class EventReplayer:
         tts: Optional[BaseTTS] = None,
         speed: float = 1.0,
         verbose: bool = True,
+        use_llm: bool = False,
+        llm_model: str = "qwen2-1_5b-instruct-q4_0",
     ):
         """
         Initialize replayer.
@@ -34,13 +37,19 @@ class EventReplayer:
             tts: Text-to-speech engine (optional)
             speed: Playback speed multiplier (1.0 = real-time, 2.0 = 2x speed, etc.)
             verbose: Print detailed event information
+            use_llm: Generate commentary via the local LLM instead of the
+                deterministic templates
+            llm_model: Model id to use when use_llm is set
         """
         self.log_file = Path(log_file)
         self.tts = tts
         self.speed = speed
         self.verbose = verbose
+        self.use_llm = use_llm
+        self.llm_model = llm_model
         self.normalizer = GeniusBasketballNormalizer()
         self.metadata: Optional[MatchMetadata] = None
+        self.llm_engine: Optional[BufferedCommentaryEngine] = None
 
         if not self.log_file.exists():
             raise FileNotFoundError(f"Log file not found: {log_file}")
@@ -63,6 +72,8 @@ class EventReplayer:
         print(f"\n{'='*60}")
         print(f"Replaying: {self.log_file}")
         print(f"Speed: {self.speed}x")
+        if self.use_llm:
+            print(f"Commentary: LLM (model={self.llm_model})")
         if start_from > 0:
             print(f"Starting from event #{start_from}")
         if max_events:
@@ -72,6 +83,16 @@ class EventReplayer:
         events_processed = 0
         events_skipped = 0
         last_timestamp = None
+
+        if self.use_llm:
+            self.llm_engine = BufferedCommentaryEngine(
+                language=language,
+                metadata_getter=lambda: self.metadata,
+                on_commentary=self._speak,
+                use_llm=True,
+                llm_model=self.llm_model,
+            )
+            self.llm_engine.start()
 
         with open(self.log_file, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
@@ -119,14 +140,17 @@ class EventReplayer:
                     # Display event
                     self._display_event(evt, line_num)
 
-                    # Generate and speak commentary
-                    spoken = get_commentary(evt, self.metadata, language=language)
-                    if spoken:
-                        print(f"  💬 {spoken}")
-                        if self.tts:
-                            self.tts.speak(spoken)
+                    if self.llm_engine:
+                        # Commentary is generated asynchronously in micro-batches.
+                        self.llm_engine.push(evt)
                     else:
-                        print(f"  💬 (no commentary)")
+                        spoken = get_commentary(evt, self.metadata, language=language)
+                        if spoken:
+                            print(f"  💬 {spoken}")
+                            if self.tts:
+                                self.tts.speak(spoken)
+                        else:
+                            print(f"  💬 (no commentary)")
 
                     events_processed += 1
 
@@ -141,6 +165,9 @@ class EventReplayer:
                         import traceback
 
                         traceback.print_exc()
+
+        if self.llm_engine:
+            self.llm_engine.stop()
 
         print(f"\n{'='*60}")
         print(f"Replay complete!")
@@ -160,6 +187,12 @@ class EventReplayer:
             print("=" * 60 + "\n")
         except Exception as e:
             print(f"[error] Failed to parse match metadata: {e}")
+
+    def _speak(self, spoken: str):
+        """Callback used by the LLM engine to output a commentary line."""
+        print(f"  💬 {spoken}")
+        if self.tts:
+            self.tts.speak(spoken)
 
     def _calculate_delay(self, last_ts: str, current_ts: str) -> float:
         """Calculate delay in seconds between two timestamps."""
@@ -285,6 +318,17 @@ def main():
         choices=["no", "en"],
         help="Language for commentary (no = Norwegian, en = English)",
     )
+    ap.add_argument(
+        "--llm",
+        action="store_true",
+        help="Generate commentary via the local LLM instead of the deterministic templates",
+    )
+    ap.add_argument(
+        "--llm-model",
+        type=str,
+        default="qwen2-1_5b-instruct-q4_0",
+        help="llm model id to use with --llm",
+    )
 
     args = ap.parse_args()
 
@@ -295,6 +339,8 @@ def main():
         tts=tts,
         speed=args.speed,
         verbose=not args.compact,
+        use_llm=args.llm,
+        llm_model=args.llm_model,
     )
 
     try:
